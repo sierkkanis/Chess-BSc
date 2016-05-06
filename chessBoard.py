@@ -311,8 +311,6 @@ printBoard()
 update parameters van de ene naar de ander
 """
 
-
-# laurens code
 X_sym = T.tensor3()
 y_sym = T.ivector()
 rew = T.scalar()
