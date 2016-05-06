@@ -1,0 +1,2 @@
+# Chess-BSc
+AI thesis
