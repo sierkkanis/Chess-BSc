@@ -1,1 +1,53 @@
 Logbook Sierk Kanis
+
+18 april
+Change of supervisor
+
+19 april
+First meeting with Stratis, agreed on basic idea
+
+20 april
+Watched lecture 1 of David Silver's Reinformcement Learning Course
+Read paper about deep reinforcement learning in Chess
+Went to lecture about deep learning in computervision
+
+21 and 22 april
+Worked out presentation and overall plan and idea. Wrote and submitted proposal
+
+26 april
+Meeting with supervisors
+
+26 - 28 april
+Watched David Silver lectures t/m 6
+
+29 april
+Looked up existing chess implementations and decided to implement my own
+
+1 may 
+Wrote representation of chess
+
+2 may
+Installed Theano and lasagne and read about both.
+Meeting with Stratis. Plan: implement a rough network for a basic gridworld example.
+Worked on the implementation with Laurens.
+
+3 may
+Meeting with supervisors.
+Worked on the implementation with Laurens.
+Read more of atari paper
+
+4 may
+Worked on the implementation with Laurens.
+Parameters did not update.
+
+5 may
+Copied code of Laurens. Found out parameters do slightly update, but gradients are very small
+Watched lecture 7 of David Silver
+Wrote supervisors for any help
+
+6 may
+
+
+
+
+
