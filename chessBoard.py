@@ -93,7 +93,9 @@ def moveKing(direction):
 
 # whiteking
 def moveKingRandom():
-	moveKing(random.randint(0,7))
+	rand = random.randint(0,7)
+	moveKing(rand)
+	return rand
 
 def boardTo2D():
 	global board2D
@@ -167,28 +169,20 @@ def isTerminalState():
 		return True
 	else:
 		return False
-"""
-boardSetup(3)
-setPiece('K', 1, 1)
-setPiece('k', 5, 6)
-setPiece('P', 4, 5)
-printBoard()
-movePiece('K', 3, 3)
-printBoard()
-movePiece('k', 5, 4)
-printBoard()
-movePiece('k', 4, 4)
-printBoard()
-moveKing(0)
-printBoard()
-moveKingRandom()
-printBoard()
 
-"""
+# like numpy reshape
+def flattenChessboard(matrix):
+	newArray = np.zeros((1,64))
+	array = []
+	for extra in range(len(matrix)):
+		for row in range(len(matrix[extra])):
+			for number in range(len(matrix[extra][row])):
+				newArray[0][row*8+number] = matrix[extra][row][number]
+				#array.append(matrix[row][number])
+	return newArray
+
 boardSetup(1)
 setPieceRandom('K')
-#printBoard()
-
 
 """
 notes:
@@ -201,191 +195,102 @@ NETWORK
 
 # A very simple network, a single layer with one neuron per target class.
 # Using the softmax activation function gives us a probability distribution at the output.
-l_in = lasagne.layers.InputLayer((1, 64, 1))
+l_in = lasagne.layers.InputLayer((1, 64))
 l_out = lasagne.layers.DenseLayer(l_in, num_units=8, nonlinearity=lasagne. nonlinearities.softmax)
 l_out_target = l_out
 
-"""
-# input is the board, now 2d
-X_sym = T.tensor3()
-# make the new board the input
-y_sym = T.tensor3()
-
-rew = T.scalar()
-distance = T.scalar()
-distanceNew = T.scalar()
-
-# output is a vector with a probability distribution
-output = lasagne.layers.get_output(l_out, X_sym)
-# prediction is a move with highest probability
-prediction = output.argmax(-1)
-predictionValue = output.max()
-
-# output_target is a vector with a probability distribution for another input
-output_target = lasagne.layers.get_output(l_out_target, y_sym)
-# get best move in new state
-prediction_target = output_target.argmax(-1)
-predictionValue_target = output_target.max()
-
-# the predictions functions
-f_predict = theano.function([X_sym], prediction)
-f_predict_target = theano.function([y_sym], prediction_target)
-f_predictValue = theano.function([X_sym], predictionValue)
-f_predictValue_target = theano.function([y_sym], predictionValue_target)
-
-#rewardFunction = distance - distanceNew - 1
-#rewardFunctionT = theano.function([distance, distanceNew], rewardFunction)
-
-# q learning loss
-loss = lasagne.objectives.squared_error(predictionValue_target + rew, predictionValue)
-
-# get weights of network
-params = lasagne.layers.get_all_params(l_out, trainable=True)
-
-# update params
-grad = T.grad(loss, params)
-updates = lasagne.updates.sgd(grad, params, learning_rate=0.5)
-
-# calculate loss based on used variables
-f_train = theano.function([X_sym, y_sym, rew], loss, updates=updates)
-
-weights = l_out.W.get_value()
-print weights[5]
-
-for i in range(1000):
-	boardSetup(1)
-	setPieceRandom('K')
-	boardR = np.reshape(board, (1,64,1))
-	predicted_move = f_predict(boardR)
-	x, y = getCoor('K')
-	moveKing(predicted_move)
-	xNew, yNew = getCoor('K')
-	reward = float(y - yNew)*2
-	boardR2 = np.reshape(board, (1,64,1))
-
-	loss = f_train(boardR, boardR2, reward)
-	#printBoard()
-
-weights2 = l_out.W.get_value()
-print weights2[5]
-"""
-
-"""
-# test
-boardSetup(1)
-setPieceRandom('K')
-
-printBoard()
-boardSetup(1)
-setPieceRandom('K')
-
-printBoard()
-"""
-
-"""
-boardSetup(1)
-setPieceRandom('K')
-
-printBoard()
-boardR = np.reshape(board, (1,64,1))
-predicted_move = f_predict(boardR)
-print predicted_move
-moveKing(predicted_move)
-
-printBoard()
-boardR = np.reshape(board, (1,64,1))
-predicted_move = f_predict(boardR)
-print predicted_move
-moveKing(predicted_move)
-
-printBoard()
-boardR = np.reshape(board, (1,64,1))
-predicted_move = f_predict(boardR)
-print predicted_move
-moveKing(predicted_move)
-
-printBoard()
-
-"""
-"""
-update parameters van de ene naar de ander
-"""
-
-X_sym = T.tensor3()
+X_sym = T.matrix()
 y_sym = T.ivector()
 rew = T.scalar()
 disc = T.scalar()
+move = T.iscalar()
 
-# Trainable network
+# trainable network
 output = lasagne.layers.get_output(l_out, X_sym)
-pred = output.argmax(-1)
-max_ = output.max()
+output2 = lasagne.layers.get_output(l_out, X_sym, deteministic = True)
+actionBest = output.argmax(-1)
+actionBestValue = output.max()
 params = lasagne.layers.get_all_params(l_out)
+actionValue = output2[0][move]
 
-# Target network
+# target network
 l_out_target = l_out
 output_target = lasagne.layers.get_output(l_out_target, X_sym)
 params2 = lasagne.layers.get_all_params(l_out_target)
-pred_target = output.argmax(-1)
-pred_target_max = output.max()
+actionBestTarget = output.argmax(-1)
+actionBestTargetValue = output_target.max()
 
-# Theano functions
-loss = T.mean((max_ - (rew + (disc * pred_target_max)))**2)
+# general lasagne
+loss = lasagne.objectives.squared_error(disc*actionBestTargetValue + rew, actionBestValue)
 grad = T.grad(loss, params)
-updates = lasagne.updates.sgd(grad, params, learning_rate=0.5)
+updates = lasagne.updates.sgd(grad, params, learning_rate=0.1)
 
-f_train = theano.function([pred_target_max, max_, X_sym, rew, disc], loss, updates=updates, allow_input_downcast=True)
-f_max = theano.function([X_sym], max_, allow_input_downcast=True)
-f_predict = theano.function([X_sym], pred, allow_input_downcast=True)
-f_predict_target = theano.function([X_sym], pred_target, allow_input_downcast=True)
-f_max_target = theano.function([X_sym], pred_target_max, allow_input_downcast=True)
-grad_calc = theano.function([pred_target_max, max_, X_sym, rew, disc], grad)
+# theano functions
+f_train = theano.function([actionBestTargetValue, actionBestValue, X_sym, rew, disc], loss, updates=updates, allow_input_downcast=True)
+q_val_max = theano.function([X_sym], actionBestValue, allow_input_downcast=True)
+q_val = theano.function([X_sym, move], actionValue)
+f_predict = theano.function([X_sym], actionBest, allow_input_downcast=True)
+f_predict_target = theano.function([X_sym], actionBestTarget, allow_input_downcast=True)
+f_predict_target_value = theano.function([X_sym], actionBestTargetValue, allow_input_downcast=True)
+grad_calc = theano.function([actionBestTargetValue, actionBestValue, X_sym, rew, disc], grad)
+
 
 weights = l_out.W.get_value()
 print weights[5], weights[2]
 
-average_loss = 0
-average_reward = 0
-for i in range(500):
-	boardSetup(1)
-	setPiece('K', 4, 4)
-	state = np.reshape(board, (1,64,1))
-	predicted_move = f_predict(state)
-	x, y = getCoor('K')
-	epsilon = 0.9
-	if random.uniform(0,1) < epsilon:
-		moveKingRandom()
-	if random.uniform(0,1) > epsilon:
-		moveKing(predicted_move)
-	xNew, yNew = getCoor('K')
-	if y > yNew:
-		reward = float(y - yNew)
-	newState = np.reshape(board, (1,64,1))
+# epsilon-greedy
+def performAction(epsilon, predictedMove, state):
+		actionValue = 0
+		if random.uniform(0,1) < epsilon:
+			randMove = moveKingRandom()
+			actionValue = q_val(state, randMove)
+		if random.uniform(0,1) > epsilon:
+			moveKing(predictedMove)
+			actionValue = q_val_max(state)
+		return actionValue
 
-	DISCOUNT = 1
-	target_max = f_max_target(newState)
-	network_max = f_max(state)
-	if isTerminalState():
-		loss = f_train(0, network_max, state, reward, 0)
-	else: 
-		loss = f_train(target_max, network_max, state, reward, DISCOUNT)
-	average_loss += loss
-	average_reward += reward
-	#print average_loss/i
+# the main training loop
+def trainLoop(iterations):
+	average_loss = 0
+	average_reward = 0
+	reward = 0
+	discount = 1
+	for i in range(iterations):
+		boardSetup(1)
+		setPiece('K', 4, 4)
+		state = flattenChessboard(board)
 
-print average_reward
-print average_loss
-gradcalcs =  grad_calc(target_max, network_max, state, reward, DISCOUNT)
-#print T.norm(gradcalcs)
-print gradcalcs
-weights2 = l_out.W.get_value()
-print weights2[5], weights2[2]
+		predictedMove = f_predict(state)
+		x, y = getCoor('K')
+		actionValue = performAction(0.9, predictedMove, state)
+		xNew, yNew = getCoor('K')
+		if y > yNew:
+			reward = float(y - yNew)
+		if y <= yNew:
+			reward = 0
+		newState = flattenChessboard(board)
+
+		predictedMoveTarget = f_predict_target_value(newState)
+		if isTerminalState():
+			loss = f_train(0, actionValue, state, reward, 0)
+		else:
+			loss = f_train(predictedMoveTarget, actionValue, state, reward, discount)
+		average_loss += loss
+		average_reward += reward
+	print average_reward
+	print average_loss	
+	#gradcalcs = grad_calc(target_max, network_q_value, state, reward, DISCOUNT)
+	#print gradcalcs	
+
+trainLoop(5)
+
+print weights[5], weights[2]
 
 # to test
 boardSetup(1)
 setPiece('K', 4, 4)
 printBoard()
-boardR = np.reshape(board, (1,64,1))
+boardR = np.reshape(board, (1,64))
 predicted_move = f_predict(boardR)
 print predicted_move
 moveKing(predicted_move)
