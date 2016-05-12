@@ -1,9 +1,10 @@
-#import chess
 import numpy as np
 import random
 import theano
 import theano.tensor as T
 import lasagne
+from lasagne.layers import InputLayer, DenseLayer
+from lasagne.nonlinearities import LeakyRectify
 
 board = 0
 board2D = 0
@@ -13,13 +14,21 @@ halfmoves = 0
 reward = 0
 discount = 0.9
 
+# for board representation
+noPieceNumber = -1.0/64.0
+PieceNumber = 63.0/64.0
+
 # reset all board parameters
 def boardSetup(amountPieces):
 	global board
 	global turn
 	global halfmoves
 	global reward
-	board = np.zeros(64*amountPieces).reshape((amountPieces,8,8))
+	global noPieceNumber
+	board = np.empty(64*amountPieces).reshape((amountPieces,8,8))
+	for x in range(len(board)):
+		for y in range(len(board[x])):
+			board[x][y] = noPieceNumber
 	turn = True
 	halfmoves = 0
 	reward = 0
@@ -28,24 +37,28 @@ def boardSetup(amountPieces):
 def setPiece(piece, x, y):
 	global board
 	global pieceDict
-	board[pieceDict.get(piece)][y][x] = (pieceDict.get(piece) + 1)
+	global PieceNumber
+	board[pieceDict.get(piece)][y][x] = PieceNumber #(pieceDict.get(piece) + 1)
 
 def setPieceRandom(piece):
 	global board
 	global pieceDict
 	xRandom = random.randint(0,7)
 	yRandom = random.randint(0,7)
-	board[pieceDict.get(piece)][yRandom][xRandom] = (pieceDict.get(piece) + 1)
+	setPiece(piece, xRandom, yRandom)
+	#board[pieceDict.get(piece)][yRandom][xRandom] = (pieceDict.get(piece) + 1)
 
 def movePiece(piece, x, y):
 	global board
 	global pieceDict
 	global turn
 	global halfmoves
+	global PieceNumber
+	global noPieceNumber
 	for n in range(x):
 		for m in range(y):
-			board[pieceDict.get(piece)][m][n] = 0
-	board[pieceDict.get(piece)][y][x] = (pieceDict.get(piece) + 1)
+			board[pieceDict.get(piece)][m][n] = noPieceNumber
+	board[pieceDict.get(piece)][y][x] = PieceNumber
 	halfmoves = halfmoves + 1
 	if turn == True:
 		turn = False
@@ -56,38 +69,43 @@ def movePiece(piece, x, y):
 def moveKing(direction):
 	global board
 	global reward
+	global PieceNumber
+	global noPieceNumber
 	x, y = getCoor('K')
 	if direction == 0 and y != 0:
-		board[0][y-1][x] = 1
-		board[0][y][x] = 0
+		board[0][y-1][x] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 1 and y != 0 and x != 0:
-		board[0][y-1][x-1] = 1
-		board[0][y][x] = 0
+		board[0][y-1][x-1] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 2 and y != 0 and x != 7:
-		board[0][y-1][x+1] = 1
-		board[0][y][x] = 0
+		board[0][y-1][x+1] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 3 and x != 0:
-		board[0][y][x-1] = 1
-		board[0][y][x] = 0
+		board[0][y][x-1] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 4 and x != 7:
-		board[0][y][x+1] = 1
-		board[0][y][x] = 0
+		board[0][y][x+1] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 5 and y != 7:
-		board[0][y+1][x] = 1
-		board[0][y][x] = 0
+		board[0][y+1][x] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 6 and y != 7 and x != 0:
-		board[0][y+1][x-1] = 1
-		board[0][y][x] = 0
+		board[0][y+1][x-1] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
 	if direction == 7 and y != 7 and x != 7:
-		board[0][y+1][x+1] = 1
-		board[0][y][x] = 0
-	# reward function
-	xNew, yNew = getCoor('K')
-	if yNew < y:
-		reward += 1
-		return 1
-	else:
-		return 0
+		board[0][y+1][x+1] = PieceNumber
+		board[0][y][x] = noPieceNumber
+		return True
+	else: 
+		return False
 		#moveKingRandom()
 		# skips the move now
 
@@ -133,7 +151,7 @@ def getCoor(piece):
 	piece = pieceDict.get(piece)
 	for y in range(len(board[piece])):
 		for x in range(len(board[piece][y])):
-			if board[piece][y][x] != 0:
+			if board[piece][y][x] > 0:
 				return x, y
 
 # for black king
@@ -147,6 +165,7 @@ def inCheck():
 		return False
 
 # add pieces on top of each other
+# if currentstate is legal
 def isLegal():
 	global turn
 	if turn == True and inCheck():
@@ -193,32 +212,34 @@ notes:
 NETWORK
 """
 
-# A very simple network, a single layer with one neuron per target class.
-# Using the softmax activation function gives us a probability distribution at the output.
+# linear regression (?)
 l_in = lasagne.layers.InputLayer((1, 64))
-l_out = lasagne.layers.DenseLayer(l_in, num_units=8, W=lasagne.init.Constant(1.), b=lasagne.init.Constant(1.))#, nonlinearity=lasagne. nonlinearities.softmax)
-l_out_target = l_out
+custom_rectify = LeakyRectify(1)
+l_out = lasagne.layers.DenseLayer(l_in, num_units=8, nonlinearity = custom_rectify)
+all_param_values = lasagne.layers.get_all_param_values(l_out)
 
-X_sym = T.matrix()
-#y_sym = T.ivector()
+# same but for target, copy weights from trainable network
+l_in_target = lasagne.layers.InputLayer((1, 64))
+l_out_target = lasagne.layers.DenseLayer(l_in_target, num_units=8, nonlinearity = custom_rectify)
+lasagne.layers.set_all_param_values(l_out_target, all_param_values)
+
+
+state = T.matrix()
+newState = T.matrix()
 rew = T.scalar()
 disc = T.scalar()
 action = T.iscalar()
 
 # trainable network
-output = lasagne.layers.get_output(l_out, X_sym)
-output2 = lasagne.layers.get_output(l_out, X_sym, deteministic = True)
-actionBest = output.argmax(-1)
-actionBestValue = output.max()
+output = lasagne.layers.get_output(l_out, state)
 params = lasagne.layers.get_all_params(l_out)
-actionValue = output2[0][action]
-# or output1, because deterministic or not?
+actionBest = output.argmax()
+actionValue = output[0][action]
+actionValues = output[0]
 
 # target network
-l_out_target = l_out
-output_target = lasagne.layers.get_output(l_out_target, X_sym)
-params2 = lasagne.layers.get_all_params(l_out_target)
-actionBestTarget = output.argmax(-1)
+output_target = lasagne.layers.get_output(l_out_target, newState)
+params_target = lasagne.layers.get_all_params(l_out_target)
 actionBestTargetValue = output_target.max()
 
 # general lasagne
@@ -227,26 +248,35 @@ grad = T.grad(loss, params)
 updates = lasagne.updates.sgd(grad, params, learning_rate=0.5)
 
 # theano functions
-f_train = theano.function([actionBestTargetValue, action, X_sym, rew, disc], loss, updates=updates, allow_input_downcast=True)
-#q_val_max = theano.function([X_sym], actionBestValue, allow_input_downcast=True)
-q_val = theano.function([X_sym, action], actionValue)
-f_predict = theano.function([X_sym], actionBest, allow_input_downcast=True)
-#f_predict_target = theano.function([X_sym], actionBestTarget, allow_input_downcast=True)
-f_predict_target_value = theano.function([X_sym], actionBestTargetValue, allow_input_downcast=True)
-grad_calc = theano.function([actionBestTargetValue, action, X_sym, rew, disc], grad)
+f_train = theano.function([state, action, newState, rew, disc], loss, updates=updates, allow_input_downcast=True)
+f_predict = theano.function([state], actionBest, allow_input_downcast=True)
+f_predict_target_value = theano.function([newState], actionBestTargetValue, allow_input_downcast=True)
+q_val = theano.function([state, action], actionValue)
+q_vals = theano.function([state], actionValues)
 
-
-weights = l_out.W.get_value()
-print weights[5], weights[2]
+# helper functions
+grad_calc = theano.function([state, action, newState, rew, disc], grad)
+output_calc = theano.function([state], output)
 
 # epsilon-greedy, return the chosen move
-def performAction(epsilon, predictedMove, state):
+def performAction(epsilon, state):
 	randomNumber = random.uniform(0,1)
+	moveSuceeded = False
 	if randomNumber < epsilon:
-		randMove = moveKingRandom()
+		randMove = 0
+		while moveSuceeded == False:
+			randMove = random.randint(0,7)
+			moveSuceeded = moveKing(rand)
 		return randMove
 	else:
-		moveKing(predictedMove)
+		qVals = q_vals(state)
+		sortedMoves = np.argsort(-qVals, axis=0)
+		counter = 0
+		predictedMove = 0
+		# choses next best move after illegal move
+		while moveSuceeded == False:
+			predictedMove = sortedMoves[counter]
+			moveSuceeded = moveKing(predictedMove)
 		return predictedMove
 
 # the main training loop
@@ -255,15 +285,16 @@ def trainLoop(iterations):
 	average_reward = 0
 	reward = 0
 	discount = 1
+	counter = 0
 	for i in range(iterations):
 		boardSetup(1)
-		setPiece('K', 4, 4)
+		#setPieceRandom('K')
+		setPiece('K', 0, 0)
 		state = flattenChessboard(board)
 
-		predictedMove1 = f_predict(state)
-		predictedMove = predictedMove1[0]
 		x, y = getCoor('K')
-		move = performAction(2, predictedMove, state)
+		# epsilon decreases over time 1-(i*0.0001)
+		move = performAction(0, state)
 		xNew, yNew = getCoor('K')
 		if y > yNew:
 			reward = float(y - yNew)
@@ -271,41 +302,79 @@ def trainLoop(iterations):
 			reward = 0
 
 		newState = flattenChessboard(board)
-		predictedMoveTarget = f_predict_target_value(newState)
+		#predictedMoveTarget = f_predict_target_value(newState)
 		#if isTerminalState():
 			#loss = f_train(0, actionValue, state, reward, 0)
 		#else:
-		loss = f_train(predictedMoveTarget, move, state, reward, discount)
+		loss = f_train(state, move, newState, reward, discount)
+
+		counter += i
+		if counter > 10:
+			all_param_values = lasagne.layers.get_all_param_values(l_out)
+			lasagne.layers.set_all_param_values(l_out_target, all_param_values)
+			counter = 0
+
 		average_loss += loss
 		average_reward += reward
-		for i in range(8):
-			gradcalcs = grad_calc(predictedMoveTarget, i, state, reward, discount)
-			a,b = gradcalcs
-			print '-'*80
-			print np.sum(a**2)
-			print np.sum(b**2)
-			print q_val(state, i)
+
+		#q values and gradient test
+		# for i in range(8):
+		# 	gradcalcs = grad_calc(predictedMoveTarget, i, state, reward, discount)
+		# 	a,b = gradcalcs
+
+		# 	print '-'*80
+		# 	print np.sum(a**2)
+		# 	print np.sum(b**2)
+		# 	print q_val(state, i)
 		#print average_reward
 		print average_loss/i	
 	#gradcalcs = grad_calc(predictedMoveTarget, move, state, reward, discount)
 	#print gradcalcs	
 
-trainLoop(1)
+weights = l_out.W.get_value()
+# weights2 = l_out_target.W.get_value()
+#print weights[0]
+# print weights2[0]
+
+trainLoop(10)
 
 weights2 = l_out.W.get_value()
-print weights-weights2
+# weights2 = l_out_target.W.get_value()
+#print weights2[0]
+#print weights2
+# print weights2[0]
 
-# to test
 boardSetup(1)
 setPiece('K', 4, 4)
-printBoard()
 state = flattenChessboard(board)
-#boardR = np.reshape(board, (1,64))
-predicted_move = f_predict(state)
-print predicted_move
-predictedMove = predicted_move[0]
-moveKing(predictedMove)
-printBoard()
+
+# print weights
+# print state
+# print output_calc(state)
+# print np.dot(state, weights)
+
+#weights2 = l_out.W.get_value()
+#print weights
+#print weights2
+#print weights-weights2
+
+# to test
+def test(iterations, j):
+	for j in range(j):
+		boardSetup(1)
+		#setPiece('K', 4, 4)
+		setPieceRandom('K')
+		printBoard()
+		for i in range(iterations):
+			state = flattenChessboard(board)
+			#boardR = np.reshape(board, (1,64))
+			predictedMove = f_predict(state)
+			moveKing(predictedMove)
+			printBoard()
+			print '-'*50
+		print '-'*100
+
+#test(5,5)
 
 """
 average loss zou omlaag moeten gaan
