@@ -27,18 +27,18 @@ Looked up existing chess implementations and decided to implement my own
 Wrote representation of chess
 
 2 may
-Installed Theano and lasagne and read about both.
-Meeting with Stratis. Plan: implement a rough network for a basic gridworld example.
-Worked on the implementation with Laurens.
+Installed Theano and lasagne and read about both
+Meeting with Stratis. Plan: implement a rough network for a basic gridworld example
+Worked on the implementation with Laurens
 
 3 may
-Meeting with supervisors.
-Worked on the implementation with Laurens.
+Meeting with supervisors
+Worked on the implementation with Laurens
 Read more of atari paper
 
 4 may
-Worked on the implementation with Laurens.
-Parameters did not update.
+Worked on the implementation with Laurens
+Parameters did not update
 
 5 may
 Copied code of Laurens. Found out parameters do slightly update, but gradients are very small
@@ -55,6 +55,39 @@ Sent mail to supervisor
 Spoke with Berkay about problem
 Spoke with Stratis, he explained basics of gradient decent
 Cleaned up code
+
+10 may
+Understood gradient descent in reinforcement learning
+King learned to move up by doing random moves
+Still zero gradients with predicted move
+Spoke with Changyong
+
+11 may
+Meeting with supervisors
+Sat down with Stratis and found a problem with output network
+Implemented ideas from meeting
+Zero gradient problem solved
+King quickly learns to move up the board
+
+12 may
+Made sure king doesn't move off the board
+Fixed error from the day before
+Cleaned up theano functions
+
+13 may
+Laptop died
+Read back my notes of David Silver's course
+
+14 may
+Read back my notes of David Silver's course
+Started on the Deep Learning course of Oxford
+
+15 may
+Finished the Deep Learning course of Oxford
+Bought a new laptop and installed programming environment
+Added terminal state and got rid of immediate rewards
+Added illegal moves and another king
+King avoids other king with only one reward at end of episode
 
 
 
