@@ -59,8 +59,8 @@ def setPieceRandom(piece):
 	onFreeSquare = False
 	# checks whether square is free to add piece.
 	while onFreeSquare == False:
-		xRandom = random.randint(0,7)
-		yRandom = random.randint(0,7)
+		xRandom = random.randint(0,3)
+		yRandom = random.randint(0,3)
 		onFreeSquare = setPiece(piece, xRandom, yRandom)
 """
 not used
@@ -356,30 +356,44 @@ def performAction(epsilon, state):
 # the main training loop
 def trainLoop(iterations):
 	average_loss = 0
-	reward = 0
 	discount = 1
 	counter = 0
 	amountOfMoves = 0
+	replayMemory = []
+
+	boardSetupPawn()
+	state = flattenChessboard()
+	reward = 0
+	newState = flattenChessboard()
+	move = 1
+
 	for i in range(iterations):
 		lengthEpisode = 0
 		boardSetupPawn()
-		#printBoard()
 		while isTerminalState() == False:
-			state = flattenChessboard()
-			x, y = getCoor('K')
-			# epsilon decreases over time, -(i*(1/2*iterations))
-			epsilon = 1 - ((float(i)-((1/10)*iterations))/iterations)
-			move = performAction(epsilon, state)
-			xNew, yNew = getCoor('K')
-			if y > yNew:
-				reward = float(y - yNew)
-			if y <= yNew:
-				reward = 0
-			newState = flattenChessboard()
+			epsilon2 = 0.2
+			randomNumber = random.uniform(0,1)
+			if randomNumber < epsilon2:
+				# picks random state from RM
+				randomNumber = random.randint(0,len(replayMemory)-1)
+				state = replayMemory[randomNumber][0]
+				move = replayMemory[randomNumber][1]
+				reward = replayMemory[randomNumber][2]
+				newState = replayMemory[randomNumber][3]	
+			else:
+				# continue game
+				state = flattenChessboard()
+				# epsilon decreases over time
+				epsilon = 1 - ((float(i)-((2/10)*iterations))/iterations)
+				move = performAction(epsilon, state)
+				newState = flattenChessboard()
+				reward = -1
+				# save experience in RM
+				replayMemory.append([state, move, reward, newState])
 			if isTerminalState():
 				loss = f_train(state, move, newState, 10, 0)
 			else:
-				loss = f_train(state, move, newState, -1, discount)
+				loss = f_train(state, move, newState, reward, discount)
 			amountOfMoves += 1
 			lengthEpisode += 1
 
@@ -419,7 +433,7 @@ def trainLoop(iterations):
 # weights = l_out.W.get_value()
 # print weights
 
-trainLoop(5000)
+trainLoop(1000)
 
 # weights2 = l_out.W.get_value()
 # print weights2
