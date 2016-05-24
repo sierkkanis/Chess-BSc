@@ -5,6 +5,9 @@ import theano.tensor as T
 import lasagne
 from lasagne.layers import InputLayer, DenseLayer
 from lasagne.nonlinearities import LeakyRectify
+import matplotlib.pyplot as plt
+import cPickle as pickle
+import os
 
 board = 0
 board2D = 0
@@ -59,8 +62,8 @@ def setPieceRandom(piece):
 	onFreeSquare = False
 	# checks whether square is free to add piece.
 	while onFreeSquare == False:
-		xRandom = random.randint(0,3)
-		yRandom = random.randint(0,3)
+		xRandom = random.randint(0,7)
+		yRandom = random.randint(0,7)
 		onFreeSquare = setPiece(piece, xRandom, yRandom)
 """
 not used
@@ -218,16 +221,20 @@ def isLegal():
 def isTerminalState():
 	global reward
 	xK, yK = getCoor('K')
+	#for pawn training
 	xP, yP = getCoor('P')
 	if yP == 0 and yK <= 1 and (xK == xP -1 or xK == xP + 1 or xK == xP):
 		return True
+	# if yK == 0:
+	# 	return True
 	else:
 		return False
 
 def boardSetupTraining():
 	boardInit(2)
 	setPieceRandom('K')
-	setPiece('k', 4, 2)
+	if setPiece('k', 4, 2) == False:
+		boardSetupTraining()
 	if isLegal() == False:
 		boardSetupTraining()
 
@@ -256,6 +263,7 @@ def flattenChessboard():
 	global board
 	amountPieces = len(board)
 	newArray = np.zeros((amountPieces,64))
+	#np.flatten()
 	for piece in range(len(board)):
 		for row in range(len(board[piece])):
 			for number in range(len(board[piece][row])):
@@ -271,14 +279,18 @@ notes:
 NETWORK
 """
 
+boardSetupPawn()
+shapeBoard = board.flatten().shape
+shapeBoard = shapeBoard[0]
+
 # linear regression (?)
-l_in = lasagne.layers.InputLayer((2, 64))
+l_in = lasagne.layers.InputLayer((1, shapeBoard))
 custom_rectify = LeakyRectify(1)
 l_out = lasagne.layers.DenseLayer(l_in, num_units=9, nonlinearity = custom_rectify)
 all_param_values = lasagne.layers.get_all_param_values(l_out)
 
 # same but for target, copy weights from trainable network
-l_in_target = lasagne.layers.InputLayer((2, 64))
+l_in_target = lasagne.layers.InputLayer((1, shapeBoard))
 l_out_target = lasagne.layers.DenseLayer(l_in_target, num_units=9, nonlinearity = custom_rectify)
 lasagne.layers.set_all_param_values(l_out_target, all_param_values)
 
@@ -293,6 +305,7 @@ action = T.iscalar()
 output = lasagne.layers.get_output(l_out, X_sym)
 params = lasagne.layers.get_all_params(l_out)
 actionBest = output.argmax()
+actionValueBest = output.max(-1)
 actionValue = output[0][action]
 actionValues = output[0]
 
@@ -302,15 +315,17 @@ params_target = lasagne.layers.get_all_params(l_out_target)
 actionBestTargetValue = output_target.max()
 
 # general lasagne
-loss = lasagne.objectives.squared_error(disc*actionBestTargetValue + rew, actionValue)
+#loss = lasagne.objectives.squared_error(disc*actionBestTargetValue + rew, actionValue)
+loss = T.mean((actionValue - (rew + (disc * actionBestTargetValue)))**2)
 grad = T.grad(loss, params)
-updates = lasagne.updates.sgd(grad, params, learning_rate=0.05)
+updates = lasagne.updates.sgd(grad, params, learning_rate=0.1)
 
 # theano functions
 f_train = theano.function([X_sym, action, Y_sym, rew, disc], loss, updates=updates, allow_input_downcast=True)
 f_predict = theano.function([X_sym], actionBest, allow_input_downcast=True)
 f_predict_target_value = theano.function([Y_sym], actionBestTargetValue, allow_input_downcast=True)
 q_val = theano.function([X_sym, action], actionValue)
+q_bestval = theano.function([X_sym], actionValueBest)
 q_vals = theano.function([X_sym], actionValues)
 
 # helper functions
@@ -353,102 +368,99 @@ def performAction(epsilon, state):
 				moveLegal = True
 		return predictedMove
 
+# globals for evaluation while training
+amountOfEpisodesTraining = 0
+cumulatedLossTrain = 0
+averageLossTraining = []
+
+cumulatedLossEpisode = 0
+cumulatedLossEpisodeList = []
+
+bestQValues = []
+
+replayMemory = []
+
+# perform action and get reward
+def fillRM():
+	global bestQValues
+	global replayMemory
+
+	state = [board.flatten()]
+	# epsilon = 1 - ((float(i)-((4/10)*iterations))/iterations)
+	epsilon = 1
+	move = performAction(epsilon, state)
+	if isTerminalState():
+		reward = 10
+		discount = 0
+	else:
+		reward = -1
+		discount = 1
+	newState = [board.flatten()]
+
+	# save experience in RM
+	if len(replayMemory) < 1000:
+		replayMemory.append([state, move, reward, newState, discount])
+	else:
+		replayMemory.pop(0)
+		replayMemory.append([state, move, reward, newState, discount])
+
+	# for evaluation
+	bestQValue = q_bestval(state)
+	bestQValue = bestQValue[0]
+	bestQValues.append(bestQValue)
+
+# pick random states from RM and train
+def trainOnRM():
+	global replayMemory
+	global cumulatedLossEpisode
+	batchSize = 1
+
+	if len(replayMemory) > 100:
+		for sample in range(batchSize):
+			randomNumber = random.randint(0, len(replayMemory) - 1)
+			state = replayMemory[randomNumber][0]
+			move = replayMemory[randomNumber][1]
+			reward = replayMemory[randomNumber][2]
+			newState = replayMemory[randomNumber][3]
+			discount = replayMemory[randomNumber][4]
+			# update params
+			loss = f_train(state, move, newState, reward, discount)
+			cumulatedLossEpisode += loss
+
 # the main training loop
 def trainLoop(iterations):
-	average_loss = 0
-	discount = 1
-	counter = 0
-	amountOfMoves = 0
-	replayMemory = []
+	global replayMemory
 
-	boardSetupPawn()
-	state = flattenChessboard()
-	reward = 0
-	newState = flattenChessboard()
-	move = 1
+	global amountOfEpisodesTraining
+	global cumulatedLossTrain
+	global averageLossTraining
+	global cumulatedLossEpisode
+	global cumulatedLossEpisodeList
+
+	global bestQValues
+	counter = 0
 
 	for i in range(iterations):
-		lengthEpisode = 0
-		boardSetupPawn()
-		while isTerminalState() == False:
-			epsilon2 = 0.2
-			randomNumber = random.uniform(0,1)
-			if randomNumber < epsilon2:
-				# picks random state from RM
-				randomNumber = random.randint(0,len(replayMemory)-1)
-				state = replayMemory[randomNumber][0]
-				move = replayMemory[randomNumber][1]
-				reward = replayMemory[randomNumber][2]
-				newState = replayMemory[randomNumber][3]	
-			else:
-				# continue game
-				state = flattenChessboard()
-				# epsilon decreases over time
-				epsilon = 1 - ((float(i)-((2/10)*iterations))/iterations)
-				move = performAction(epsilon, state)
-				newState = flattenChessboard()
-				reward = -1
-				# save experience in RM
-				replayMemory.append([state, move, reward, newState])
-			if isTerminalState():
-				loss = f_train(state, move, newState, 10, 0)
-			else:
-				loss = f_train(state, move, newState, reward, discount)
-			amountOfMoves += 1
-			lengthEpisode += 1
+		amountOfEpisodesTraining += 1
+		cumulatedLossEpisode = 0
 
-		# qVals = q_vals(state)
-		# print np.sort(qVals)
-		# print np.argsort(qVals, axis=0)
-		# print f_predict_target_value(state)
-		#doesn't work yet
+		# update target network
 		counter += 1
-		if counter > 100:
+		if counter == 50:
 			all_param_values = lasagne.layers.get_all_param_values(l_out)
 			lasagne.layers.set_all_param_values(l_out_target, all_param_values)
-			print ' updated'
-			# state will always be terminal
-			# qVals = q_vals(state)
-			# print np.sort(qVals)
-			# print np.argsort(qVals, axis=0)
 			counter = 0
 
-		#print lengthEpisode
-		#print amountOfMoves/(i+1)
+		# to play games
+		boardSetupPawn()
+		while isTerminalState() == False:
+			fillRM()
+			trainOnRM()
 
-		#q values and gradient test
-		# for i in range(8):
-		# 	gradcalcs = grad_calc(predictedMoveTarget, i, state, reward, discount)
-		# 	a,b = gradcalcs
-
-		# 	print '-'*80
-		# 	print np.sum(a**2)
-		# 	print np.sum(b**2)
-		# 	print q_val(state, i)
-		#print average_reward
-		#print average_loss/i	
-	#gradcalcs = grad_calc(predictedMoveTarget, move, state, reward, discount)
-	#print gradcalcs	
-
-# weights = l_out.W.get_value()
-# print weights
-
-trainLoop(1000)
-
-# weights2 = l_out.W.get_value()
-# print weights2
-# print weights2 - weights
-
-
-# print weights
-# print state
-# print output_calc(state)
-# print np.dot(state, weights)
-
-#weights2 = l_out.W.get_value()
-#print weights
-#print weights2
-#print weights-weights2
+		# for evaluation
+		cumulatedLossTrain += cumulatedLossEpisode
+		cumulatedLossEpisodeList.append(cumulatedLossEpisode)
+		averageLossTraining.append(cumulatedLossTrain/amountOfEpisodesTraining)
 
 # to test
 def test(iterations):
@@ -458,25 +470,113 @@ def test(iterations):
 		# printBoard()
 		counter = 0
 		lengthEpisode = 0
-		while isTerminalState() == False and counter < 30:
-			state = flattenChessboard()
+		while isTerminalState() == False and counter < 50:
+			#state = flattenChessboard()
+			state = [board.flatten()]
 
 			qVals = q_vals(state)
 			print np.sort(qVals)
 			print np.argsort(qVals, axis=0)
 			printBoard()
+			print '-'*50
 			performAction(0, state)
 
 			counter += 1
 			amountOfMoves += 1
 			lengthEpisode += 1
-			#print '-'*50
 		printBoard()
 		print lengthEpisode
 	print amountOfMoves/(iterations)
-		#print '-'*100
 
-test(5)
+
+amountOfEpisodesTest = 0
+lengthEpisodeList = []
+accumulatedLengthEpisode = 0
+averageLengthEpisode = 0
+averageLengthEpisodeList = []
+
+
+# to evaluate during training
+def evaluateDuringTraining(iterations):
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global accumulatedLengthEpisode
+	global averageLengthEpisodeList
+	global averageLengthEpisode
+	for i in range(iterations):
+		amountOfEpisodesTest += 1
+		boardSetupPawn()
+		counter = 0
+		lengthEpisode = 0
+		while isTerminalState() == False and counter < 50:
+			state = [board.flatten()]
+			performAction(0, state)
+			counter += 1
+			lengthEpisode += 1
+
+		lengthEpisodeList.append(lengthEpisode)
+		accumulatedLengthEpisode += lengthEpisode
+		averageLengthEpisodeList.append(accumulatedLengthEpisode/amountOfEpisodesTest)
+
+def evaluate():
+	# while training
+	global amountOfEpisodesTraining
+	global cumulatedLossEpisodeList
+	global averageLossTraining
+	# while evaluating during training
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global averageLengthEpisodeList
+
+	global bestQValues
+
+	#evaluation
+	# plot q vals of best move in all episodes
+	amountOfEpisodesTrainingList = np.arange(amountOfEpisodesTraining)
+	#plt.plot(amountOfEpisodesTraining, bestQValues)
+	#plt.show()
+	# plot cost per episode
+	# plt.figure()
+	# plt.plot(amountOfEpisodesTrainingList, cumulatedLossEpisodeList)
+	plt.figure()
+	plt.plot(amountOfEpisodesTrainingList, averageLossTraining)
+
+	amountOfEpisodesTestList = np.arange(amountOfEpisodesTest)
+	# plt.figure()
+	# plt.plot(amountOfEpisodesTestList, lengthEpisodeList)
+	plt.figure()
+	plt.plot(amountOfEpisodesTestList, averageLengthEpisodeList)
+	plt.show()
+
+modelFile = 'Models/SavedModel.txt'
+def saveModel():
+	global modelFile
+	all_param_values = lasagne.layers.get_all_param_values(l_out)
+	with open(modelFile, 'w') as f:
+		pickle.dump(all_param_values, f)
+
+def loadModel():
+	global modelFile
+	with open(modelFile, 'r') as f:
+		loadedParams = pickle.load(f)
+	lasagne.layers.set_all_param_values(l_out, loadedParams)
+
+def train():
+	loadModel()
+	for i in range(1):
+		trainLoop(101)
+		# maybe save the values in a file for better viz
+		#print '-' * 50
+		#evaluateDuringTraining(10)
+	#test(10)
+	evaluate()
+	saveModel()
+
+train()
+
+
+
+
 
 """
 average loss zou omlaag moeten gaan
