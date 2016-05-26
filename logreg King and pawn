@@ -37,7 +37,15 @@ def boardInit(amountPieces):
 	halfmoves = 0
 	reward = 0
 
-# set piece, doesn't remove the old
+def getCoor(piece):
+	global board
+	piece = pieceDict.get(piece)
+	for y in range(len(board[piece])):
+		for x in range(len(board[piece][y])):
+			if board[piece][y][x] > 0:
+				return x, y
+
+# set piece, doesn't remove the old, absolute coordinates
 def setPiece(piece, x, y):
 	global board
 	global pieceDict
@@ -50,8 +58,8 @@ def setPiece(piece, x, y):
 		return False
 
 def freeSquare(x, y):
+	global pieceDict2
 	for piece in range(len(board)):
-		pieceString = "'" + pieceDict2.get(piece) + "'"
 		if getCoor(pieceDict2.get(piece)) != None:
 			xx, yy = getCoor(pieceDict2.get(piece))
 			if x == xx and y == yy:
@@ -65,6 +73,15 @@ def setPieceRandom(piece):
 		xRandom = random.randint(0,7)
 		yRandom = random.randint(0,7)
 		onFreeSquare = setPiece(piece, xRandom, yRandom)
+
+def setPieceSemiRandom(piece):
+	onFreeSquare = False
+	# checks whether square is free to add piece.
+	while onFreeSquare == False:
+		xRandom = random.randint(0,7)
+		yRandom = random.randint(0,7)
+		onFreeSquare = setPiece(piece, xRandom, 7)
+
 """
 not used
 def movePiece(piece, x, y):
@@ -181,14 +198,6 @@ def printBoard():
 	print reward
 	"""
 
-def getCoor(piece):
-	global board
-	piece = pieceDict.get(piece)
-	for y in range(len(board[piece])):
-		for x in range(len(board[piece][y])):
-			if board[piece][y][x] > 0:
-				return x, y
-
 # for black king
 def inCheck():
 	global board
@@ -200,12 +209,13 @@ def inCheck():
 		return False
 
 # add pieces on top of each other
-# if currentstate is legal, if kings touch oneanother (or are on top of eachother, 
+# if currentstate is illegal, if kings touch oneanother (or are on top of eachother,
 # can only happen with setup, so re place later)
 def isLegal():
 	global turn
 	# if turn == True and inCheck():
 	# 	return False
+	# only when more pieces are on board
 	if len(board) > 1:
 		xk, yk = getCoor('k')
 		xK, yK = getCoor('K')
@@ -214,6 +224,8 @@ def isLegal():
 			or (yk == yK +1 and (xk == xK - 1 or xk == xK or xk == xK + 1))
 			or (xk == xK and yk == yK)):
 			return False
+		else:
+			return True
 	else:
 		return True
 
@@ -230,6 +242,8 @@ def isTerminalState():
 	else:
 		return False
 
+# When creating random positions watch out for illegal positions
+
 def boardSetupTraining():
 	boardInit(2)
 	setPieceRandom('K')
@@ -245,18 +259,24 @@ def boardSetupOneKing():
 def boardSetupPawn():
 	boardInit(3)
 	setPieceRandom('K')
-	setPieceRandom('P')
+	if setPiece('P', 4, 0) == False:
+		boardSetupPawn()
+	setPiece('P', 4, 0)
 	if setPiece('k', 7, 7) == False:
 		boardSetupPawn()
 	if isLegal() == False:
 		boardSetupPawn()
 
-def boardSetupTest():
-	boardInit(2)
-	setPiece('K', 4, 6)
-	setPiece('k', 4, 2)
+def boardSetupPawnTest():
+	boardInit(3)
+	setPieceSemiRandom('K')
+	if setPiece('P', 4, 0) == False:
+		boardSetupPawn()
+	setPiece('P', 4, 0)
+	if setPiece('k', 7, 7) == False:
+		boardSetupPawn()
 	if isLegal() == False:
-		boardSetupTest()
+		boardSetupPawn()
 
 # like numpy reshape, returns flattend array of 2d board, with shape (1,64)
 def flattenChessboard():
@@ -278,20 +298,28 @@ notes:
 """
 NETWORK
 """
+boardInit(2)
+setPiece('K', 2, 2)
+setPiece('k', 2, 4)
+printBoard()
+
+print freeSquare(3,2)
+print getCoor(pieceDict2.get(0))
+print getCoor(pieceDict2.get(1))
+print isLegal()
 
 boardSetupPawn()
-shapeBoard = board.flatten().shape
-shapeBoard = shapeBoard[0]
+printBoard()
+shapeBoardOneBatch = np.expand_dims(board.flatten(), 0).shape
 
 # linear regression (?)
-l_in = lasagne.layers.InputLayer((1, shapeBoard))
-custom_rectify = LeakyRectify(1)
-l_out = lasagne.layers.DenseLayer(l_in, num_units=9, nonlinearity = custom_rectify)
+l_in = lasagne.layers.InputLayer(shapeBoardOneBatch)
+l_out = lasagne.layers.DenseLayer(l_in, num_units=9, nonlinearity = None)
 all_param_values = lasagne.layers.get_all_param_values(l_out)
 
 # same but for target, copy weights from trainable network
-l_in_target = lasagne.layers.InputLayer((1, shapeBoard))
-l_out_target = lasagne.layers.DenseLayer(l_in_target, num_units=9, nonlinearity = custom_rectify)
+l_in_target = lasagne.layers.InputLayer(shapeBoardOneBatch)
+l_out_target = lasagne.layers.DenseLayer(l_in_target, num_units=9, nonlinearity = None)
 lasagne.layers.set_all_param_values(l_out_target, all_param_values)
 
 
@@ -304,7 +332,7 @@ action = T.iscalar()
 # trainable network
 output = lasagne.layers.get_output(l_out, X_sym)
 params = lasagne.layers.get_all_params(l_out)
-actionBest = output.argmax()
+actionBest = output.argmax(-1)
 actionValueBest = output.max(-1)
 actionValue = output[0][action]
 actionValues = output[0]
@@ -318,12 +346,12 @@ actionBestTargetValue = output_target.max()
 #loss = lasagne.objectives.squared_error(disc*actionBestTargetValue + rew, actionValue)
 loss = T.mean((actionValue - (rew + (disc * actionBestTargetValue)))**2)
 grad = T.grad(loss, params)
-updates = lasagne.updates.sgd(grad, params, learning_rate=0.1)
+updates = lasagne.updates.sgd(grad, params, learning_rate=0.01)
 
 # theano functions
-f_train = theano.function([X_sym, action, Y_sym, rew, disc], loss, updates=updates, allow_input_downcast=True)
-f_predict = theano.function([X_sym], actionBest, allow_input_downcast=True)
-f_predict_target_value = theano.function([Y_sym], actionBestTargetValue, allow_input_downcast=True)
+f_train = theano.function([X_sym, action, Y_sym, rew, disc], loss, updates=updates)
+f_predict = theano.function([X_sym], actionBest)
+f_predict_target_value = theano.function([Y_sym], actionBestTargetValue)
 q_val = theano.function([X_sym, action], actionValue)
 q_bestval = theano.function([X_sym], actionValueBest)
 q_vals = theano.function([X_sym], actionValues)
@@ -335,41 +363,34 @@ output_calc = theano.function([X_sym], output)
 # epsilon-greedy, return the chosen move. high epsilon for random moves
 def performAction(epsilon, state):
 	randomNumber = random.uniform(0,1)
-	moveOnBoard = False
-	moveLegal = False
+	moveLegal = True
 	redoMoveDict = {0:5, 1:7, 2:6, 3:4, 4:3, 5:0, 6:2, 7:1}
+
 	if randomNumber < epsilon:
-		randMove = 0
-		while moveOnBoard == False or moveLegal == False:
-			randMove = random.randint(0,8)
-			# performs move if move is on board
-			moveOnBoard = movePiece(randMove)
-			# redoes move when position is illegal
-			if isLegal() == False:
-				redoMove = redoMoveDict.get(randMove)
-				movePiece(redoMove)
-			else:
-				moveLegal = True
-		return randMove
+		move = random.randint(0,8)
 	else:
-		qVals = q_vals(state)
-		sortedMoves = np.argsort(-qVals, axis=0)
-		counter = 0
-		predictedMove = 0
-		# choses next best move after illegal move
-		while moveOnBoard == False or moveLegal == False:
-			predictedMove = sortedMoves[counter]
-			moveOnBoard = movePiece(predictedMove)
-			counter += 1
-			if isLegal() == False:
-				redoMove = redoMoveDict.get(predictedMove)
-				movePiece(redoMove)
-			else:
-				moveLegal = True
-		return predictedMove
+		move = f_predict(state)
+		# to get rid of the array
+		move = move[0]
+
+	# performs move only if move is legal
+	moveOnBoard = movePiece(move)
+	if moveOnBoard == False:
+		moveLegal = False
+	if isLegal() == False:
+		redoMove = redoMoveDict.get(move)
+		movePiece(redoMove)
+		moveLegal = False
+
+	return move, moveLegal
+
+replayMemory = []
+replayMemory = np.asarray(replayMemory)
+epsilon = 1.0
 
 # globals for evaluation while training
 amountOfEpisodesTraining = 0
+amountOfMovesTraining = 0
 cumulatedLossTrain = 0
 averageLossTraining = []
 
@@ -378,28 +399,45 @@ cumulatedLossEpisodeList = []
 
 bestQValues = []
 
-replayMemory = []
+# globals for evaluation in between training
+amountOfEpisodesTest = 0
+lengthEpisodeList = []
+accumulatedLengthEpisode = 0
+averageLengthEpisode = 0
+averageLengthEpisodeList = []
 
 # perform action and get reward
 def fillRM():
+	global all_param_valueslist
 	global bestQValues
 	global replayMemory
+	global amountOfMovesTraining
+	global epsilon
 
-	state = [board.flatten()]
+	global cumulatedLossEpisode
+
+	amountOfMovesTraining += 1
+	state = np.expand_dims(board.flatten(), 0)
 	# epsilon = 1 - ((float(i)-((4/10)*iterations))/iterations)
-	epsilon = 1
-	move = performAction(epsilon, state)
-	if isTerminalState():
-		reward = 10
-		discount = 0
+
+	if amountOfMovesTraining % 1000 and amountOfMovesTraining > 0:
+		epsilon = np.max(0.1,epsilon - 0.1)
+	move, moveLegal = performAction(epsilon, state)
+	if moveLegal == False:
+		reward = -10
+		discount = 0.99
 	else:
-		reward = -1
-		discount = 1
-	newState = [board.flatten()]
+		if isTerminalState():
+			reward = 10
+			discount = 0
+		else:
+			reward = -1
+			discount = 0.99
+	newState = np.expand_dims(board.flatten(), 0)
 
 	# save experience in RM
 	if len(replayMemory) < 1000:
-		replayMemory.append([state, move, reward, newState, discount])
+		np.append(replayMemory, [state, move, reward, newState, discount])
 	else:
 		replayMemory.pop(0)
 		replayMemory.append([state, move, reward, newState, discount])
@@ -409,13 +447,21 @@ def fillRM():
 	bestQValue = bestQValue[0]
 	bestQValues.append(bestQValue)
 
+	#loss = f_train(state, move, newState, reward, discount)
+	#cumulatedLossEpisode += loss
+
+	# print bestQValue
+	# print output_calc(state)
+	# all_param_values = lasagne.layers.get_all_param_values(l_out)
+	# print np.dot(state, all_param_values[0]) + all_param_values[1]
+
 # pick random states from RM and train
 def trainOnRM():
 	global replayMemory
 	global cumulatedLossEpisode
 	batchSize = 1
 
-	if len(replayMemory) > 100:
+	if len(replayMemory) > 10:
 		for sample in range(batchSize):
 			randomNumber = random.randint(0, len(replayMemory) - 1)
 			state = replayMemory[randomNumber][0]
@@ -466,13 +512,13 @@ def trainLoop(iterations):
 def test(iterations):
 	amountOfMoves = 0
 	for i in range(iterations):
-		boardSetupPawn()
+		boardSetupPawnTest()
 		# printBoard()
 		counter = 0
 		lengthEpisode = 0
 		while isTerminalState() == False and counter < 50:
 			#state = flattenChessboard()
-			state = [board.flatten()]
+			state = np.expand_dims(board.flatten(), 0)
 
 			qVals = q_vals(state)
 			print np.sort(qVals)
@@ -488,14 +534,6 @@ def test(iterations):
 		print lengthEpisode
 	print amountOfMoves/(iterations)
 
-
-amountOfEpisodesTest = 0
-lengthEpisodeList = []
-accumulatedLengthEpisode = 0
-averageLengthEpisode = 0
-averageLengthEpisodeList = []
-
-
 # to evaluate during training
 def evaluateDuringTraining(iterations):
 	global amountOfEpisodesTest
@@ -505,11 +543,11 @@ def evaluateDuringTraining(iterations):
 	global averageLengthEpisode
 	for i in range(iterations):
 		amountOfEpisodesTest += 1
-		boardSetupPawn()
+		boardSetupPawnTest()
 		counter = 0
-		lengthEpisode = 0
+		lengthEpisode = 0.0
 		while isTerminalState() == False and counter < 50:
-			state = [board.flatten()]
+			state = np.expand_dims(board.flatten(), 0)
 			performAction(0, state)
 			counter += 1
 			lengthEpisode += 1
@@ -520,6 +558,7 @@ def evaluateDuringTraining(iterations):
 
 def evaluate():
 	# while training
+	global amountOfMovesTraining
 	global amountOfEpisodesTraining
 	global cumulatedLossEpisodeList
 	global averageLossTraining
@@ -533,17 +572,19 @@ def evaluate():
 	#evaluation
 	# plot q vals of best move in all episodes
 	amountOfEpisodesTrainingList = np.arange(amountOfEpisodesTraining)
-	#plt.plot(amountOfEpisodesTraining, bestQValues)
+	amountOfMovesTrainingList = np.arange(amountOfMovesTraining)
+	plt.figure()
+	plt.plot(amountOfMovesTrainingList, bestQValues)
 	#plt.show()
 	# plot cost per episode
 	# plt.figure()
 	# plt.plot(amountOfEpisodesTrainingList, cumulatedLossEpisodeList)
 	plt.figure()
-	plt.plot(amountOfEpisodesTrainingList, averageLossTraining)
+	plt.plot(amountOfEpisodesTrainingList[10:], averageLossTraining[10:])
 
 	amountOfEpisodesTestList = np.arange(amountOfEpisodesTest)
-	# plt.figure()
-	# plt.plot(amountOfEpisodesTestList, lengthEpisodeList)
+	plt.figure()
+	plt.plot(amountOfEpisodesTestList, lengthEpisodeList)
 	plt.figure()
 	plt.plot(amountOfEpisodesTestList, averageLengthEpisodeList)
 	plt.show()
@@ -560,20 +601,86 @@ def loadModel():
 	with open(modelFile, 'r') as f:
 		loadedParams = pickle.load(f)
 	lasagne.layers.set_all_param_values(l_out, loadedParams)
+	lasagne.layers.set_all_param_values(l_out_target, loadedParams)
+
+outputFile1  = 'Models/SavedReplaymemory.npy'
+outputFile2  = 'Models/amountOfMovesTraining.npy'
+outputFile3  = 'Models/amountOfEpisodesTraining.npy'
+outputFile4  = 'Models/cumulatedLossEpisodeList.npy'
+outputFile5  = 'Models/averageLossTraining.npy'
+outputFile6  = 'Models/amountOfEpisodesTest.npy'
+outputFile7  = 'Models/lengthEpisodeList.npy'
+outputFile8  = 'Models/averageLengthEpisodeList.npy'
+outputFile9  = 'Models/bestQValues.npy'
+outputFile10  = 'Models/epsilon.npy'
+
+def saveEvaluation():
+	np.save(outputFile1, replayMemory)
+	np.save(outputFile2, amountOfMovesTraining)
+	np.save(outputFile3, amountOfEpisodesTraining)
+	np.save(outputFile4, cumulatedLossEpisodeList)
+	np.save(outputFile5, averageLossTraining)
+	np.save(outputFile6, amountOfEpisodesTest)
+	np.save(outputFile7, lengthEpisodeList)
+	np.save(outputFile8, averageLengthEpisodeList)
+	np.save(outputFile9, bestQValues)
+	np.save(outputFile10, epsilon)
+
+def loadEvaluation():
+	global replayMemory
+
+	global amountOfMovesTraining
+	global amountOfEpisodesTraining
+	global cumulatedLossEpisodeList
+	global averageLossTraining
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global averageLengthEpisodeList
+	global bestQValues
+
+	global epsilon
+
+	replayMemory =  np.load(outputFile1)
+	amountOfMovesTraining =  np.load(outputFile2)
+	amountOfEpisodesTraining =  np.load(outputFile3)
+	cumulatedLossEpisodeList =  np.load(outputFile4)
+	averageLossTraining =  np.load(outputFile5)
+	amountOfEpisodesTest =  np.load(outputFile6)
+	lengthEpisodeList =  np.load(outputFile7)
+	averageLengthEpisodeList =  np.load(outputFile8)
+	bestQValues =  np.load(outputFile9)
+	epsilon =  np.load(outputFile10)
 
 def train():
+	#
 	loadModel()
+	loadEvaluation()
+
 	for i in range(1):
-		trainLoop(101)
+		trainLoop(102)
+		print '-' * 50
 		# maybe save the values in a file for better viz
-		#print '-' * 50
-		#evaluateDuringTraining(10)
-	#test(10)
-	evaluate()
-	saveModel()
+		evaluateDuringTraining(10)
+
+	#test(20)
+	#evaluate()
+	#saveModel()
+	saveEvaluation()
+
 
 train()
 
+
+
+
+
+# boardSetupPawn()
+# state = np.expand_dims(board.flatten(), 0)
+# #move, il = performAction(0,state)
+# fillRM()
+# fillRM()
+# fillRM()
+# print replayMemory
 
 
 
