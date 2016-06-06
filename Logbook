@@ -89,6 +89,68 @@ Added terminal state and got rid of immediate rewards
 Added illegal moves and another king
 King avoids other king with only one reward at end of episode
 
+16 may
+Evaluated the learning process
+Added a pawn
+
+17 may
+Meeting with supervisors
+
+18 - 20
+Trouble with evaluating the learning process
+Wrote evaluation methods
+Wrote a method to save the paramaters of the neural network
+Added the replay memory
+
+23 may
+Academic writing course
+
+24 may
+Meeting with supervisors
+Tested on the most basic situations
+
+25 may
+Found out that epsilon descreasing was necessary to learn.
+Agent was able to learn with random initialisation of pawn an king positions on 8 x 8 board
+
+26 may
+Prepared the midterm presentation
+
+27 may
+Midterm presentation
+Learned pycharm
+Changed the way the agent is handling illegal moves
+
+28 and 29 may
+Wrote the first version of the literature overview
+
+30 may
+Made the other king move too
+Saved evaluation methods
+Connected to Das4
+
+31 may
+Meeting with supervisors
+
+1 and 2 june
+Transformed the loss to being able to cope with batches.
+
+3 june
+Cleaned up my whole chess implementation and fixed bugs
+Added stalemate
+
+4 june
+Made a nice representation of the chess board
+
+5 june
+Improved the literature overview
+
+6 june
+Academic writing course
+Improved the literature overview
+
+
+
 
 
 
