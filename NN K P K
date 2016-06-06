@@ -9,6 +9,11 @@ import matplotlib.pyplot as plt
 import cPickle as pickle
 import os
 import time
+from PIL import Image
+import PIL
+import sys
+import scipy.misc
+
 
 ####################
 # Chess implementation
@@ -26,7 +31,8 @@ piecesList = []
 KCoors = (0,0)
 kCoors = (0,0)
 PCoors = (0,0)
-boardSize = 4
+boardSize = 8
+saveNumber = 0
 
 # for board representation
 noPieceNumber = -1.0/(boardSize*boardSize)
@@ -53,6 +59,76 @@ def printBoard():
 	print board2D
 	print "side = ", side, ", legal = ", isLegal(), ", terminal = ", isTerminalState()
 
+# to make custom size chessboard
+# print new.shape
+#
+# for x in range(0,800):
+# 	for y in range(0,800):
+# 		for z in range(0, 3):
+# 			# print new[x][x]
+# 			new[x][y][z] = 0
+#
+# for i in range(4):
+# 	for j in range(4):
+# 		p = 0
+# 		if i%2 == 0:
+# 			p = 1
+# 		for y in range(2*i-p*100,(2*i+1-p)*100):
+# 			for x in range((2*j*100),((2*j+1)*100)):
+# 				for z in range(0,3):
+# 					#print new[x][x]
+# 					new[x][y][z] = 255
+# 					#print new[x][x]
+
+def boardToImage():
+	global saveNumber
+	global piecesList
+	newimage = Image.open("Images/chessboard.jpg")
+	newimage = newimage.resize((800, 800), PIL.Image.ANTIALIAS)
+	board = np.asarray(newimage)
+	board.flags.writeable = True
+
+	bk = Image.open("Images/blackking.jpg")
+	bk = bk.resize((100, 100), PIL.Image.ANTIALIAS)
+	bk = bk.convert("L")
+	bk = np.asarray(bk)
+
+	wk = Image.open("Images/whiteking.jpg")
+	wk = wk.resize((100, 100), PIL.Image.ANTIALIAS)
+	wk = wk.convert("L")
+	wk = np.asarray(wk)
+
+	p = Image.open("Images/blackpawn.png")
+	p = p.resize((100, 100), PIL.Image.ANTIALIAS)
+	p = p.convert("L")
+	p = np.asarray(p)
+
+	x, y = getCoor('K')
+	board = placePieceImage(bk, board, x, y)
+	x, y = getCoor('k')
+	board = placePieceImage(wk, board, x, y)
+	if 'P' in piecesList:
+		x, y = getCoor('P')
+		board = placePieceImage(p, board, x, y)
+
+	filename = "Games/board" + str(saveNumber) + ".jpg"
+	scipy.misc.imsave(filename, board)
+	saveNumber +=1
+
+def placePieceImage(piece, board, xC, yC):
+	xC = xC *100
+	yC = yC * 100
+
+	for x in range(0,100):
+		for y in range(0,100):
+			for z in range(0,3):
+				board[x+yC][y+xC][z] = piece[x][y]
+	return board
+
+
+
+
+#newimage.save("Games/new.jpg")
 
 # reset all board parameters
 def boardInit(amountPieces):
@@ -426,58 +502,17 @@ def stalemate():
 	else:
 		return False
 
-# boardSetupPawn2()
-#
-# print movePiece(8)
-# printBoard()
-# print isTerminalState()
-# print side
-# print isLegal()
-# print movePiece(0)
-# printBoard()
-#
-# print side
-# print isLegal()
-#
-# print movePiece(8)
-# printBoard()
-# print side
-# print isLegal()
-#
-# print movePiece(3)
-# printBoard()
-# print side
-# print isLegal()
-#
-# print movePiece(0)
-# printBoard()
-# print side
-# print isLegal()
-#
-# print movePiece(5)
-# printBoard()
-# print side
-# print isLegal()
-#
-# print board
-# print getCoor('k')
-# print getCoor('K')
-# print getCoor('P')
-
-# la = np.ones(192)
-# print  np.expand_dims(la, 0)
-# print np.array([la])
-# print [la]
-
-
 #######################
 # DEEP REINFORCEMENT LEARNING
 #######################
 batchSize = 32
+learningRate = 0.01
 
 boardSetupPawn()
-print board
-shapeBoardOneBatch = np.expand_dims(board.flatten(), 0).shape
+# print board
+# print np.ones(192)
+# print np.array([np.ones(192)])
+# shapeBoardOneBatch = np.expand_dims(board.flatten(), 0).shape
 shapeBoard = len(board.flatten())
 
 
@@ -527,7 +562,7 @@ diff = target - network
 loss = 0.5 * diff ** 2
 loss = T.mean(loss)
 grad = T.grad(loss, params)
-updates = lasagne.updates.sgd(grad, params, learning_rate=0.01)
+updates = lasagne.updates.sgd(grad, params, learning_rate=learningRate)
 
 # theano functions
 f_train = theano.function([X_sym, action, Y_sym, rew, disc, action_target], loss, updates=updates, allow_input_downcast=True)
@@ -601,14 +636,18 @@ def fillRM():
 	global amountOfMovesTraining
 	global epsilon
 	global cumulatedLossEpisode
+	global learningRate
 
 	amountOfMovesTraining += 1
 	#epsilon = 1 - ((float(amountOfMovesTraining)-((1/10)*iterationsToTrain))/iterationsToTrain)
-	if amountOfMovesTraining % 4000 == 0 and amountOfMovesTraining > 0:
+	if amountOfMovesTraining % 6000 == 0 and amountOfMovesTraining > 0:
 		epsilon = max(0.1, epsilon - 0.1)
 
+	if amountOfMovesTraining % 6000 == 0 and amountOfMovesTraining > 0:
+		learningRate -= 0.001
+
 	state = board.flatten()
-	move, moveLegal = performAction(epsilon, np.expand_dims(state, 0))
+	move, moveLegal = performAction(epsilon, np.array([state]))
 	# if K made a move, only then k makes a move too
 	if moveLegal == True:
 		moveBlackKingRandom()
@@ -628,14 +667,14 @@ def fillRM():
 			discount = 0.99
 
 	# save experience in RM
-	if len(replayMemory) < 1000:
+	if len(replayMemory) < 10000:
 		replayMemory.append([state, move, reward, newState, discount])
 	else:
 		replayMemory.pop(0)
 		replayMemory.append([state, move, reward, newState, discount])
 
 	#for evaluation
-	bestQValue = q_bestval(np.expand_dims(state, 0))
+	bestQValue = q_bestval(np.array([state]))
 	bestQValue = bestQValue[0]
 	bestQValues.append(bestQValue)
 
@@ -690,7 +729,7 @@ def trainLoop(iterations):
 
 		# update target network
 		counter += 1
-		if counter == 50:
+		if counter == 100:
 			all_param_values = lasagne.layers.get_all_param_values(l_out)
 			lasagne.layers.set_all_param_values(l_out_target, all_param_values)
 			counter = 0
@@ -709,6 +748,26 @@ def trainLoop(iterations):
 # Test and evaluation methods
 ###################
 
+def moveBothKingsTest():
+	state = np.array([board.flatten()])
+	# both kings move
+	move, moveLegal = performAction(0, state)
+	while moveLegal == False and stalemate() == False:
+		move, moveLegal = performAction(1, state)
+	#boardToImage()
+	printBoard()
+	moveBlackKingRandom()
+	#boardToImage()
+	printBoard()
+
+def moveBothKingsEval():
+	state = np.array([board.flatten()])
+	# both kings move
+	move, moveLegal = performAction(0, state)
+	while moveLegal == False and stalemate() == False:
+		move, moveLegal = performAction(1, state)
+	moveBlackKingRandom()
+
 # to test
 def test(iterations):
 	amountOfInfiniteLoops = 0
@@ -717,21 +776,16 @@ def test(iterations):
 	draws = 0
 	for i in range(iterations):
 		boardSetupPawn()
+		printBoard()
 		counter = 0
 		lengthEpisode = 0
 		while isTerminalState() == False and counter < 50:
-			state = np.expand_dims(board.flatten(), 0)
 
-			qVals = q_vals(state)
+			qVals = q_vals(np.array([board.flatten()]))
 			print np.sort(qVals)
 			print np.argsort(qVals, axis=0)
-			printBoard()
-
-			# both kings move
-			move, moveLegal = performAction(0, state)
-			while moveLegal == False and stalemate() == False:
-				move, moveLegal = performAction(1, state)
-			moveBlackKingRandom()
+			print '-'*50
+			moveBothKingsTest()
 
 			if counter == 30:
 				amountOfInfiniteLoops += 1
@@ -739,23 +793,21 @@ def test(iterations):
 				print '-' * 50
 				print '-' * 50
 
-			print '-'*50
+
 			counter += 1
 			amountOfMoves += 1
 			lengthEpisode += 1
-		printBoard()
 		if isTerminalState() == 'won':
 			wins += 1
 		if isTerminalState() == 'drawn':
 			draws += 1
 
-		#printBoard()
 		print lengthEpisode
 	print '-' * 50
-	print amountOfInfiniteLoops
-	print amountOfMoves/(iterations)
-	print wins
-	print draws
+	print "infinite loops = ", amountOfInfiniteLoops
+	print "moves = " , amountOfMoves/(iterations)
+	print "wins = ", wins
+	print "draws = ", draws
 
 # to evaluate during training
 def evaluateDuringTraining(iterations):
@@ -773,8 +825,7 @@ def evaluateDuringTraining(iterations):
 		counter = 0
 		lengthEpisode = 0.0
 		while isTerminalState() == False and counter < 50:
-			state = np.expand_dims(board.flatten(), 0)
-			performAction(0, state)
+			moveBothKingsEval()
 			counter += 1
 			lengthEpisode += 1
 			if counter == 49:
@@ -959,24 +1010,24 @@ def train():
 	#
 	#loadModel()
 	#loadEvaluation()
-	amountOfLoopsJ = 10
+	amountOfLoopsJ = 300
 	amountOfLoops += amountOfLoopsJ
 	iterations = 102
 
 	for i in range(amountOfLoopsJ):
 		print i
-		print epsilon
+		#print epsilon
 		t0 = time.clock()
 		trainLoop(iterations)
 		print time.clock() - t0, "seconds process time"
 		timePerLoop.append(time.clock() - t0)
 		print '-' * 50
-		#evaluateDuringTraining(50)
+		evaluateDuringTraining(20)
 
-	test(20)
+	test(100)
 	evaluate()
-	#saveModel()
-	#saveEvaluation()
+	saveModel()
+	saveEvaluation()
 
 
 train()
