@@ -1,0 +1,1263 @@
+import numpy as np
+import random
+import theano
+import theano.tensor as T
+import lasagne
+from lasagne.layers import InputLayer, DenseLayer
+from lasagne.nonlinearities import LeakyRectify, sigmoid, rectify
+import matplotlib.pyplot as plt
+import matplotlib
+import cPickle as pickle
+import os
+import time
+from PIL import Image
+import PIL
+import sys
+import scipy.misc
+import xboard
+import sunfish
+import chess
+import gaviota
+
+####################
+# Chess implementation
+###################
+
+board = 0
+board2D = 0
+pieceDict = {'K' : 0, 'k' : 1, 'P' : 2}
+pieceDict2 = {0 : 'K', 1 : 'k', 2: 'P'}
+side = True
+halfmoves = 0
+reward = 0
+discount = 0.9
+piecesList = []
+KCoors = (0,0)
+kCoors = (0,0)
+PCoors = (0,0)
+boardSize = 8
+saveNumber = 0
+maxNodesEngine = 200
+draw50Moves = 0
+
+boardSunFish = list(
+	'         \n'  # 0 -  9
+	'         \n'  # 10 - 19
+	' ........\n'  # 20 - 29
+	' ........\n'  # 30 - 39
+	' ........\n'  # 40 - 49
+	' ........\n'  # 50 - 59
+	' ........\n'  # 60 - 69
+	' ........\n'  # 70 - 79
+	' ........\n'  # 80 - 89
+	' ........\n'  # 90 - 99
+	'         \n'  # 100 -109
+	'          '  # 110 -119
+)
+
+# for board representation
+noPieceNumber = -1.0/(boardSize*boardSize)
+PieceNumber = ((boardSize*boardSize) - 1.0)/(boardSize*boardSize)
+# prints the coors of all pieces on a 2d board
+def boardTo2D():
+	global board2D
+	global board
+	global piecesList
+	global boardSize
+	board2D = np.chararray((boardSize,boardSize))
+	board2D[:] = '.'
+	print piecesList
+	for piece in piecesList:
+		x, y = getCoor(piece)
+		board2D[y][x] = piece
+
+# nice print
+def printBoard():
+	global board2D
+	global side
+	boardTo2D()
+	print board2D
+	print "side = ", side, ", legal = ", isLegal(), ", terminal = ", isTerminalState()
+
+# to make custom size chessboard
+# print new.shape
+#
+# for x in range(0,800):
+# 	for y in range(0,800):
+# 		for z in range(0, 3):
+# 			# print new[x][x]
+# 			new[x][y][z] = 0
+#
+# for i in range(4):
+# 	for j in range(4):
+# 		p = 0
+# 		if i%2 == 0:
+# 			p = 1
+# 		for y in range(2*i-p*100,(2*i+1-p)*100):
+# 			for x in range((2*j*100),((2*j+1)*100)):
+# 				for z in range(0,3):
+# 					#print new[x][x]
+# 					new[x][y][z] = 255
+# 					#print new[x][x]
+
+def boardToImage():
+	global saveNumber
+	global piecesList
+	newimage = Image.open("Images/chessboard.jpg")
+	newimage = newimage.resize((800, 800), PIL.Image.ANTIALIAS)
+	board = np.asarray(newimage)
+	board.flags.writeable = True
+
+	bk = Image.open("Images/blackking.jpg")
+	bk = bk.resize((100, 100), PIL.Image.ANTIALIAS)
+	bk = bk.convert("L")
+	bk = np.asarray(bk)
+
+	wk = Image.open("Images/whiteking.jpg")
+	wk = wk.resize((100, 100), PIL.Image.ANTIALIAS)
+	wk = wk.convert("L")
+	wk = np.asarray(wk)
+
+	p = Image.open("Images/blackpawn.png")
+	p = p.resize((100, 100), PIL.Image.ANTIALIAS)
+	p = p.convert("L")
+	p = np.asarray(p)
+
+	x, y = getCoor('K')
+	board = placePieceImage(bk, board, x, y)
+	x, y = getCoor('k')
+	board = placePieceImage(wk, board, x, y)
+	if 'P' in piecesList:
+		x, y = getCoor('P')
+		board = placePieceImage(p, board, x, y)
+
+	filename = "Games/board" + str(saveNumber) + ".jpg"
+	scipy.misc.imsave(filename, board)
+	saveNumber +=1
+
+def placePieceImage(piece, board, xC, yC):
+	xC = xC *100
+	yC = yC * 100
+
+	for x in range(0,100):
+		for y in range(0,100):
+			for z in range(0,3):
+				board[x+yC][y+xC][z] = piece[x][y]
+	return board
+
+# reset all board parameters
+def boardInit(amountPieces):
+	global boardSize
+	global board
+	global noPieceNumber
+	global piecesList
+	global KCoors
+	global kCoors
+	global PCoors
+	global side
+	global boardSunFish
+	global draw50Moves
+
+	side = True
+	KCoors = (0, 0)
+	kCoors = (0, 0)
+	PCoors = (0, 0)
+	piecesList = []
+	draw50Moves = 0
+	boardSunFish = list(
+		'         \n'  # 0 -  9
+		'         \n'  # 10 - 19
+		' ........\n'  # 20 - 29
+		' ........\n'  # 30 - 39
+		' ........\n'  # 40 - 49
+		' ........\n'  # 50 - 59
+		' ........\n'  # 60 - 69
+		' ........\n'  # 70 - 79
+		' ........\n'  # 80 - 89
+		' ........\n'  # 90 - 99
+		'         \n'  # 100 -109
+		'          '  # 110 -119
+	)
+	board = np.empty(boardSize*boardSize*amountPieces).reshape((amountPieces,boardSize,boardSize))
+	for x in range(len(board)):
+		for y in range(len(board[x])):
+			board[x][y] = noPieceNumber
+
+def switchSide():
+	global side
+	if side == True:
+		side = False
+	else:
+		side = True
+
+def getCoor(piece):
+	global KCoors
+	global kCoors
+	global PCoors
+	if piece == 'K':
+		x, y = KCoors
+		return x,y
+	if piece == 'k':
+		x, y = kCoors
+		return x,y
+	if piece == 'P':
+		x, y = PCoors
+		return x,y
+
+# switches side when the coors are changed.
+def setCoor(piece, x, y):
+	global KCoors
+	global kCoors
+	global PCoors
+	if piece == 'K':
+		KCoors = (x, y)
+	if piece == 'k':
+		kCoors = (x, y)
+	if piece == 'P':
+		PCoors = (x, y)
+	switchSide()
+
+# checks whether square is free
+def freeSquare(x, y):
+	global piecesList
+	for piece in piecesList:
+		xx, yy = getCoor(piece)
+		if x == xx and y == yy:
+			return False
+	return True
+
+# set piece, doesn't remove the old, absolute coordinates
+def setPiece(piece, x, y):
+	global board
+	global pieceDict
+	global PieceNumber
+	global piecesList
+	if freeSquare(x, y):
+		board[pieceDict.get(piece)][y][x] = PieceNumber
+		setCoor(piece, x, y)
+		piecesList.append(piece)
+		return True
+	else:
+		return False
+
+def setPieceRandom(piece):
+	onFreeSquare = False
+	global boardSize
+	# checks whether square is free to add piece.
+	while onFreeSquare == False:
+		xRandom = random.randint(0,boardSize-1)
+		yRandom = random.randint(0,boardSize-1)
+		onFreeSquare = setPiece(piece, xRandom, yRandom)
+
+# used for the pawn
+def setPieceSemiRandom(piece):
+	onFreeSquare = False
+	# checks whether square is free to add piece.
+	while onFreeSquare == False:
+		xRandom = random.randint(0,7)
+		yRandom = random.randint(1,6)
+		onFreeSquare = setPiece(piece, xRandom, yRandom)
+
+# translates my board representation to that over engine SunFish
+def boardToSunFish():
+	global boardSunFish
+	global piecesList
+	boardSunFish = list(
+		'         \n'  # 0 -  9
+		'         \n'  # 10 - 19
+		' ........\n'  # 20 - 29
+		' ........\n'  # 30 - 39
+		' ........\n'  # 40 - 49
+		' ........\n'  # 50 - 59
+		' ........\n'  # 60 - 69
+		' ........\n'  # 70 - 79
+		' ........\n'  # 80 - 89
+		' ........\n'  # 90 - 99
+		'         \n'  # 100 -109
+		'          '  # 110 -119
+	)
+	for piece in piecesList:
+		x, y = getCoor(piece)
+		place = 21 + x + y*10
+		boardSunFish[place] = piece
+	return "".join(boardSunFish)
+
+##############
+# board setups
+##############
+
+def boardSetupStalemate():
+	global side
+	boardInit(3)
+	setPiece('P', 0, 1)
+	setPiece('k', 2, 0)
+	setPiece('K', 0, 0)
+	side = True
+
+def boardSetupPawn():
+	global side
+	boardInit(3)
+	setPieceSemiRandom('P')
+	# setPiece('P', 4,0)
+	# setPiece('K',4,4)
+	setPieceRandom('K')
+	setPieceRandom('k')
+	if isLegal() == False:
+		boardSetupPawn()
+	side = True
+
+def boardSetupPawn2():
+	global side
+	boardInit(3)
+	setPiece('P', 4, 1)
+	setPiece('k', 7, 2)
+	setPiece('K', 6, 0)
+	side = True
+
+# returns -1, 0 or 1 corresponding to whether a position is won or not.
+def boardEvaluation():
+	board = chess.Board(None)
+
+	piece = chess.Piece(chess.PAWN,chess.WHITE)
+	x, y = getCoor('P')
+	place = x + (7-y)*8
+	board.set_piece_at(place,piece)
+
+	piece = chess.Piece(chess.KING,chess.BLACK)
+	x, y = getCoor('k')
+	place = x + (7-y)*8
+	board.set_piece_at(place,piece)
+
+	piece = chess.Piece(chess.KING,chess.WHITE)
+	x, y = getCoor('K')
+	place = x + (7-y)*8
+	board.set_piece_at(place,piece)
+
+	with gaviota.open_tablebases("data/gaviota") as tablebases:
+		return tablebases.probe_wdl(board)
+
+#################
+# move the pieces
+#################
+
+# moves king into direction
+def movePiece(direction, piece):
+	global board
+	global reward
+	global PieceNumber
+	global noPieceNumber
+	global pieceDict
+	x, y = getCoor(piece)
+	if direction == 0:
+		board[pieceDict.get(piece)][y-1][x] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x, y-1)
+	if direction == 1:
+		board[pieceDict.get(piece)][y-1][x-1] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x-1, y-1)
+	if direction == 2:
+		board[pieceDict.get(piece)][y-1][x+1] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x+1, y-1)
+	if direction == 3:
+		board[pieceDict.get(piece)][y][x-1] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x-1, y)
+	if direction == 4:
+		board[pieceDict.get(piece)][y][x+1] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x+1, y)
+	if direction == 5:
+		board[pieceDict.get(piece)][y+1][x] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x, y+1)
+	if direction == 6:
+		board[pieceDict.get(piece)][y+1][x-1] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x-1, y+1)
+	if direction == 7:
+		board[pieceDict.get(piece)][y+1][x+1] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x+1, y+1)
+	if direction == 8:
+		board[pieceDict.get(piece)][y - 1][x] = PieceNumber
+		board[pieceDict.get(piece)][y][x] = noPieceNumber
+		setCoor(piece, x, y - 1)
+
+def checkIsLegal(piece, x,y):
+	if isLegal():
+		setCoor(piece, x, y)
+		return True
+	else:
+		setCoor(piece, x, y)
+		return False
+
+# black has no other pieces
+def ownPieceOnCoor(king, x, y, selfPiece):
+	global piecesList
+	if king == 'K':
+		for piece in piecesList:
+			xx, yy = getCoor(piece)
+			if x == xx and y == yy and piece != selfPiece:
+				return True
+		return False
+	if king == 'k':
+		return False
+
+# checks for illegal and off board moves
+def tryToMoveKing(direction, king):
+	global board
+	global reward
+	global PieceNumber
+	global noPieceNumber
+	global pieceDict
+	global boardSize
+	x, y = getCoor(king)
+	if direction == 0 and y != 0 and ownPieceOnCoor(king, x, y-1, king) == False:
+		setCoor(king, x, y-1)
+		return checkIsLegal(king, x,y)
+	if direction == 1 and y != 0 and x != 0 and ownPieceOnCoor(king, x-1, y-1, king) == False:
+		setCoor(king, x-1, y-1)
+		return checkIsLegal(king, x, y)
+	if direction == 2 and y != 0 and x != boardSize-1 and ownPieceOnCoor(king, x+1, y-1, king) == False:
+		setCoor(king, x+1, y-1)
+		return checkIsLegal(king, x, y)
+	if direction == 3 and x != 0 and ownPieceOnCoor(king, x-1, y, king) == False:
+		setCoor(king, x-1, y)
+		return checkIsLegal(king, x, y)
+	if direction == 4 and x != boardSize-1 and ownPieceOnCoor(king, x+1, y, king) == False:
+		setCoor(king, x+1, y)
+		return checkIsLegal(king, x, y)
+	if direction == 5 and y != boardSize-1 and ownPieceOnCoor(king, x, y+1, king) == False:
+		setCoor(king, x, y+1)
+		return checkIsLegal(king, x, y)
+	if direction == 6 and y != boardSize-1 and x != 0 and ownPieceOnCoor(king, x-1, y+1, king) == False:
+		setCoor(king, x-1, y+1)
+		return checkIsLegal(king, x, y)
+	if direction == 7 and y != boardSize-1 and x != boardSize-1 and ownPieceOnCoor(king, x+1, y+1, king) == False:
+		setCoor(king, x+1, y+1)
+		return checkIsLegal(king, x, y)
+	else:
+		return False
+
+#################
+# move white pieces
+#################
+
+# set coors but also back
+def tryToMovePawn(direction):
+	global board
+	global piecesList
+	if 'P' in piecesList:
+		x, y = getCoor('P')
+		if direction == 8 and y != 0 and ownPieceOnCoor('K', x, y-1, 'P') == False:
+			setCoor('P', x, y - 1)
+			return checkIsLegal('P', x,y)
+		else:
+			return False
+	else:
+		return False
+
+def tryToMovePiece(direction):
+	if direction <= 7:
+		return tryToMoveKing(direction, 'K'), 'K'
+	if direction == 8:
+		return tryToMovePawn(direction), 'P'
+
+def movePieceIfPossible(direction):
+	moveIsPossible, piece = tryToMovePiece(direction)
+	if moveIsPossible == None:
+		print 'NONE!'
+		print piece
+	if moveIsPossible == True:
+		movePiece(direction, piece)
+		return True
+	else:
+		return False
+
+
+#############
+# move black king
+#############
+
+def moveBlackKingRandom():
+	legalMove = False
+	while legalMove == False and stalemate() == False:
+		direction = random.randint(0, 7)
+		legalMove = tryToMoveKing(direction, 'k')
+		if legalMove == True:
+			movePiece(direction, 'k')
+			takePieceWhenPossible()
+
+# when black king stands on top of pawn
+def takePieceWhenPossible():
+	global noPieceNumber
+	global piecesList
+	if 'P' in piecesList:
+		xk, yk = getCoor('k')
+		xP, yP = getCoor('P')
+		if xk == xP and yk == yP:
+			board[2][yP][xP] = noPieceNumber
+			piecesList.remove('P')
+
+# pos = xboard.parseFEN('8/8/8/1k6/8/2P5/8/K7 w - - 0 1')
+# print pos
+#
+# boardSetupPawn2()
+# boardSun = boardToSunFish()
+# print boardSun
+# # do the other params make sense?
+# score = sum(sunfish.pst[p][i] for i, p in enumerate(boardSun) if p.isupper())
+# score -= sum(sunfish.pst[p.upper()][i] for i, p in enumerate(boardSun) if p.islower())
+# print score
+
+def moveBlackKing(maxn):
+	global noPieceNumber
+	global PieceNumber
+	global board
+	global draw50Moves
+	# transforms board to sunfish representation
+	boardSun = boardToSunFish()
+	# do the other params make sense?
+	score = sum(sunfish.pst[p][i] for i, p in enumerate(boardSun) if p.isupper())
+	score -= sum(sunfish.pst[p.upper()][i] for i, p in enumerate(boardSun) if p.islower())
+	pos = sunfish.Position(boardSun, score=score, wc=(False, False), bc=(False, False), ep=0, kp=0)
+	# to make black move
+	pos = pos.rotate()
+	if stalemate() == False:
+		m, _ = sunfish.search(pos, maxn)
+		if m != None:
+			move = xboard.mrender(0, pos, m)
+			# to change back to my representation
+			sunfishMoveDict = {'a': 7, 'b': 6, 'c': 5, 'd': 4, 'e': 3, 'f': 2, 'g': 1, 'h': 0}
+			y = int(move[3]) - 1
+			x = sunfishMoveDict.get(move[2])
+			# performs the new move
+			xOld, yOld = getCoor('k')
+			setCoor('k', x, y)
+			draw50Moves += 1
+			if isLegal() == False:
+				setCoor('k', xOld, yOld)
+				moveBlackKingRandom()
+				print 'Black did a random move'
+			else:
+				board[1][yOld][xOld] = noPieceNumber
+				board[1][y][x] = PieceNumber
+				takePieceWhenPossible()
+		else:
+			moveBlackKingRandom()
+			print 'SUNFISH MOVE WAS NONE'
+
+#################
+# board position checks
+#################
+
+# for black king and one pawn
+def inCheck():
+	global board
+	global piecesList
+	if 'P' in piecesList:
+		xP, yP = getCoor('P')
+		xk, yk = getCoor('k')
+		if yk == yP -1 and (xk == xP - 1 or xk == xP + 1):
+			return True
+	else:
+		return False
+
+# when kings touch or are in check without having the move
+def isLegal():
+	global side
+	global piecesList
+	if side == True and inCheck():
+		return False
+	# only when more pieces are on board
+	if len(piecesList) > 1:
+		xk, yk = getCoor('k')
+		xK, yK = getCoor('K')
+		if ((yk == yK -1 and (xk == xK - 1 or xk == xK or xk == xK + 1))
+			or (yk == yK and (xk == xK - 1 or xk == xK or xk == xK + 1))
+			or (yk == yK +1 and (xk == xK - 1 or xk == xK or xk == xK + 1))
+			or (xk == xK and yk == yK)):
+			return False
+		else:
+			return True
+	else:
+		return True
+
+# only checked after both kings moved
+def isTerminalState():
+	global reward
+	global piecesList
+	global draw50Moves
+	if 'P' in piecesList:
+		xP, yP = getCoor('P')
+		if yP == 0:
+			return 'won'
+		elif stalemate():
+			return 'drawn'
+		# elif draw50Moves > 50:
+		# 	print '50 move rule'
+		# 	return 'drawn'
+		else:
+			return False
+	else:
+		return 'drawn'
+
+# stalemate
+def stalemate():
+	global side
+	kCanMove = False
+	KCanMove = False
+	for i in range(7):
+		if tryToMoveKing(i,'k') == True:
+			kCanMove = True
+	for i in range(7):
+		if tryToMoveKing(i, 'K') == True:
+			KCanMove = True
+	if tryToMovePawn(8) == True:
+		KCanMove = True
+
+	if kCanMove == False and side == False:
+		return True
+	elif KCanMove == False and side == True:
+		return True
+	else:
+		return False
+
+#######################
+# DEEP REINFORCEMENT LEARNING
+#######################
+batchSize = 32
+learningRate = 0.001
+
+boardSetupPawn()
+# print board
+# print np.ones(192)
+# print np.array([np.ones(192)])
+# shapeBoardOneBatch = np.expand_dims(board.flatten(), 0).shape
+shapeBoard = len(board.flatten())
+
+
+X_sym = T.matrix()
+Y_sym = T.matrix()
+rew = T.ivector()
+disc = T.vector()
+action = T.ivector()
+action_target = T.ivector()
+
+# linear regression (?)
+l_in = lasagne.layers.InputLayer(shape=(None, shapeBoard))
+l_hidden = lasagne.layers.DenseLayer(l_in, num_units=100, nonlinearity = rectify)
+l_hidden2 = lasagne.layers.DenseLayer(l_hidden, num_units=50, nonlinearity = rectify)
+l_hidden3 = lasagne.layers.DenseLayer(l_hidden2, num_units=25, nonlinearity = rectify)
+l_out = lasagne.layers.DenseLayer(l_hidden3, num_units=9, nonlinearity = None)
+all_param_values = lasagne.layers.get_all_param_values(l_out)
+
+# same but for target, copy weights from trainable network
+l_in_target = lasagne.layers.InputLayer(shape=(None, shapeBoard))
+l_hidden_target = lasagne.layers.DenseLayer(l_in_target, num_units=100, nonlinearity = rectify)
+l_hidden2_target = lasagne.layers.DenseLayer(l_hidden_target, num_units=50, nonlinearity = rectify)
+l_hidden3_target = lasagne.layers.DenseLayer(l_hidden2_target, num_units=25, nonlinearity = rectify)
+l_out_target = lasagne.layers.DenseLayer(l_hidden3_target, num_units=9, nonlinearity = None)
+lasagne.layers.set_all_param_values(l_out_target, all_param_values)
+
+# trainable network
+output = lasagne.layers.get_output(l_out, X_sym)
+params = lasagne.layers.get_all_params(l_out)
+actionBest = output.argmax(-1)
+actionValueBest = output.max(-1)
+actionValue = output[0][action]
+actionValues = output[0]
+
+# target network
+output_target = lasagne.layers.get_output(l_out_target, Y_sym)
+params_target = lasagne.layers.get_all_params(l_out_target)
+actionBestTargetValue = output_target.max()
+actionBestTarget = output_target.argmax(-1)
+
+# general lasagne
+#loss = lasagne.objectives.squared_error(disc*actionBestTargetValue + rew, actionValue)
+#loss = T.mean((output[T.arange(batchSize), action.reshape((-1,))] - (rew + (disc * actionBestTargetValue)))**2)
+target = (rew + disc * output_target[T.arange(batchSize), action_target])
+network = output[T.arange(batchSize), action]
+diff = target - network
+loss = 0.5 * diff ** 2
+loss = T.mean(loss)
+grad = T.grad(loss, params)
+updates = lasagne.updates.sgd(grad, params, learning_rate=learningRate)
+
+# theano functions
+f_train = theano.function([X_sym, action, Y_sym, rew, disc, action_target], loss, updates=updates, allow_input_downcast=True)
+f_predict = theano.function([X_sym], actionBest, allow_input_downcast=True)
+f_predict_target_value = theano.function([Y_sym], actionBestTargetValue, allow_input_downcast=True)
+q_val = theano.function([X_sym, action], actionValue, allow_input_downcast=True)
+q_bestval = theano.function([X_sym], actionValueBest, allow_input_downcast=True)
+q_vals = theano.function([X_sym], actionValues, allow_input_downcast=True)
+f_predict_target = theano.function([Y_sym], actionBestTarget, allow_input_downcast=True)
+
+# helper functions
+grad_calc = theano.function([X_sym, action, Y_sym, rew, disc, action_target], grad)
+output_calc = theano.function([X_sym], output)
+network_calc = theano.function([X_sym, action], network)
+target_calc = theano.function([Y_sym, rew, disc, action_target], target)
+
+################
+# globals for training and evaluation
+####################
+
+replayMemory = []
+epsilon = 0.8
+iterationsToTrain = 0
+
+# globals for evaluation while training
+amountOfEpisodesTraining = 0
+amountOfMovesTraining = 0
+cumulatedLossTrain = 0
+averageLossTraining = []
+
+cumulatedLossEpisode = 0
+cumulatedLossEpisodeList = []
+
+bestQValues = []
+
+# globals for evaluation in between training
+amountOfEpisodesTest = 0
+lengthEpisodeList = []
+accumulatedLengthEpisode = 0
+averageLengthEpisode = 0
+averageLengthEpisodeList = []
+amountOfInfiniteLoops = 0
+amountOfInfiniteLoopsList = []
+
+amountOfLoops = 0
+timePerLoop = []
+
+####################
+# Training methods
+###################
+
+# epsilon-greedy, return the chosen move. high epsilon for random moves
+def performAction(epsilon, state):
+	randomNumber = random.uniform(0,1)
+	if randomNumber < epsilon:
+		move = random.randint(0,8)
+	else:
+		move = f_predict(state)
+		# to get rid of the array
+		move = move[0]
+
+	# performs move only if move is legal
+	return move, movePieceIfPossible(move)
+
+
+# perform action and get reward
+def fillRM():
+	global all_param_valueslist
+	global bestQValues
+	global replayMemory
+	global amountOfMovesTraining
+	global epsilon
+	global cumulatedLossEpisode
+	global learningRate
+
+	global maxNodesEngine
+	global draw50Moves
+
+	amountOfMovesTraining += 1
+	#epsilon = 1 - ((float(amountOfMovesTraining)-((1/10)*iterationsToTrain))/iterationsToTrain)
+	if amountOfMovesTraining % 1000 == 0 and amountOfMovesTraining > 0:
+		epsilon = max(0.1, epsilon - 0.1)
+
+	# if amountOfMovesTraining % 1000 == 0 and amountOfMovesTraining > 0:
+	# 	learningRate -= 0.001
+
+	state = board.flatten()
+	move, moveLegal = performAction(epsilon, np.array([state]))
+	# if K made a move, only then k makes a move too
+	if moveLegal == True:
+		#moveBlackKing(maxNodesEngine)
+		moveBlackKingRandom()
+	newState = board.flatten()
+	if moveLegal == False and stalemate() == False:
+		reward = -10
+		discount = 0.99
+	else:
+		if isTerminalState() == 'won':
+			reward = 10
+			discount = 0
+		if isTerminalState() == 'drawn':
+			reward = -10
+			discount = 0
+		if isTerminalState() == False:
+			reward = -1
+			discount = 0.99
+
+	# save experience in RM
+	if len(replayMemory) < 10000:
+		replayMemory.append([state, move, reward, newState, discount])
+	else:
+		replayMemory.pop(0)
+		replayMemory.append([state, move, reward, newState, discount])
+
+	#for evaluation
+	bestQValue = q_bestval(np.array([state]))
+	bestQValue = bestQValue[0]
+	bestQValues.append(bestQValue)
+
+# pick random states from RM and train
+def trainOnRM():
+	global replayMemory
+	global cumulatedLossEpisode
+	global batchSize
+
+	if len(replayMemory) > 100:
+		states = []
+		moves = []
+		rewards = []
+		newStates = []
+		discounts = []
+		targetMoves = []
+		for sample in range(batchSize):
+			randomNumber = random.randint(0, len(replayMemory) - 1)
+			states.append(replayMemory[randomNumber][0])
+			moves.append(replayMemory[randomNumber][1])
+			rewards.append(replayMemory[randomNumber][2])
+			newStates.append(replayMemory[randomNumber][3])
+			discounts.append(replayMemory[randomNumber][4])
+			#print replayMemory[randomNumber][3].shape
+			targetMove = f_predict_target(np.array([replayMemory[randomNumber][3]]))
+			targetMove = targetMove[0]
+			targetMoves.append(targetMove)
+			# update params
+		loss = f_train(states, moves, newStates, rewards, discounts, targetMoves)
+		cumulatedLossEpisode += loss
+
+# the main training loop
+def trainLoop(iterations):
+	global replayMemory
+
+	global amountOfEpisodesTraining
+	global cumulatedLossTrain
+	global averageLossTraining
+	global cumulatedLossEpisode
+	global cumulatedLossEpisodeList
+
+	global bestQValues
+	updateTarget = 0
+
+	for i in range(iterations):
+		amountOfEpisodesTraining += 1
+		cumulatedLossEpisode = 0
+
+		# update target network
+		updateTarget += 1
+		if updateTarget == 100:
+			all_param_values = lasagne.layers.get_all_param_values(l_out)
+			lasagne.layers.set_all_param_values(l_out_target, all_param_values)
+			updateTarget = 0
+
+		# to play games
+		boardSetupPawn()
+		counter = 0
+		while isTerminalState() == False and counter < 50:
+			fillRM()
+			trainOnRM()
+			if counter == 49:
+				'50 moves rule, game quit.'
+			counter += 1
+
+		# for evaluation
+		cumulatedLossTrain += cumulatedLossEpisode
+		cumulatedLossEpisodeList.append(cumulatedLossEpisode)
+		averageLossTraining.append(cumulatedLossTrain/amountOfEpisodesTraining)
+
+####################
+# Test and evaluation methods
+###################
+
+# saves board in file
+def moveBothKingsSaveBoard():
+	global maxNodesEngine
+	state = np.array([board.flatten()])
+	# both kings move
+	move, moveLegal = performAction(0, state)
+	while moveLegal == False and stalemate() == False:
+		move, moveLegal = performAction(1, state)
+	boardToImage()
+	printBoard()
+	moveBlackKing(maxNodesEngine)
+	boardToImage()
+	printBoard()
+
+# moves both kings
+def moveBothKingsTest(learned):
+	global maxNodesEngine
+	state = np.array([board.flatten()])
+	# both kings move
+	if learned:
+		move, moveLegal = performAction(0, state)
+	else:
+		move, moveLegal = performAction(1, state)
+	while moveLegal == False and stalemate() == False:
+		move, moveLegal = performAction(1, state)
+	#moveBlackKing(maxNodesEngine)
+	moveBlackKingRandom()
+
+# to test, save option to save image of board in file, learned option to use NN or not
+def test(iterations, save, learned):
+	amountOfInfiniteLoops = 0
+	amountOfMoves = 0
+	wins = 0
+	winningPositions = 0.0
+	draws = 0
+	drawnPositions = 0.0
+
+	wonInWinningPosition = 0.0
+	wonInDrawnPosition = 0.0
+
+	movesToWin = 0.0
+	for i in range(iterations):
+		boardSetupPawn()
+		score = boardEvaluation()
+		if score == 1:
+			winningPositions += 1
+		if score == 0:
+			drawnPositions += 1
+
+		counter = 0
+		lengthEpisode = 0
+		while isTerminalState() == False and counter < 50:
+			if save:
+				qVals = q_vals(np.array([board.flatten()]))
+				print np.sort(qVals)
+				print np.argsort(qVals, axis=0)
+				print '-' * 50
+				moveBothKingsSaveBoard()
+				if counter == 30:
+					amountOfInfiniteLoops += 1
+					print 'INFINITE LOOP!'
+					print '-' * 50
+					print '-' * 50
+			else:
+				moveBothKingsTest(learned)
+
+			counter += 1
+			amountOfMoves += 1
+			lengthEpisode += 1
+
+		if isTerminalState() == 'won':
+			if score == 1:
+				wonInWinningPosition += 1
+			if score == 0:
+				wonInDrawnPosition += 1
+			wins += 1
+			movesToWin += lengthEpisode
+		if isTerminalState() == 'drawn':
+
+			draws += 1
+
+		#print lengthEpisode
+	print winningPositions
+	print drawnPositions
+	print '-' * 50
+	return amountOfInfiniteLoops, movesToWin/wins, wonInWinningPosition/winningPositions, wonInDrawnPosition/drawnPositions
+
+# to evaluate during training
+def evaluateDuringTraining(iterations):
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global accumulatedLengthEpisode
+	global averageLengthEpisodeList
+	global averageLengthEpisode
+	global amountOfInfiniteLoops
+	global amountOfInfiniteLoopsList
+	global maxNodesEngine
+
+	for i in range(iterations):
+		amountOfEpisodesTest += 1
+		boardSetupPawn()
+		counter = 0
+		lengthEpisode = 0.0
+		while isTerminalState() == False and counter < 50:
+			moveBothKingsTest(maxNodesEngine)
+			counter += 1
+			lengthEpisode += 1
+			if counter == 49:
+				amountOfInfiniteLoops += 1
+
+		lengthEpisodeList.append(lengthEpisode)
+		accumulatedLengthEpisode += lengthEpisode
+		averageLengthEpisodeList.append(accumulatedLengthEpisode/amountOfEpisodesTest)
+		amountOfInfiniteLoopsList.append(amountOfInfiniteLoops)
+
+def evaluate():
+	# while training
+	global amountOfMovesTraining
+	global amountOfEpisodesTraining
+	global cumulatedLossEpisodeList
+	global averageLossTraining
+	# while evaluating during training
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global averageLengthEpisodeList
+	global amountOfInfiniteLoops
+	global amountOfInfiniteLoopsList
+
+	global bestQValues
+	global amountOfLoops
+	global timePerLoop
+
+	#evaluation
+	# plot q vals of best move in all episodes
+	amountOfEpisodesTrainingList = np.arange(amountOfEpisodesTraining)
+	amountOfMovesTrainingList = np.arange(amountOfMovesTraining)
+
+	plt.figure()
+	plt.plot(amountOfMovesTrainingList, bestQValues)
+	plt.savefig('Plots/bestQ.png')
+	#plt.show()
+	# plot cost per episode
+	# plt.figure()
+	# plt.plot(amountOfEpisodesTrainingList, cumulatedLossEpisodeList)
+	plt.figure()
+	plt.plot(amountOfEpisodesTrainingList[500:], averageLossTraining[500:])
+	plt.savefig('Plots/AvLoss.png')
+	amountOfEpisodesTestList = np.arange(amountOfEpisodesTest)
+	plt.figure()
+	plt.plot(amountOfEpisodesTestList[30:], lengthEpisodeList[30:])
+	plt.savefig('Plots/moves.png')
+	plt.figure()
+	plt.plot(amountOfEpisodesTestList, averageLengthEpisodeList)
+	plt.savefig('Plots/avmoves.png')
+	plt.figure()
+	plt.plot(amountOfEpisodesTestList, amountOfInfiniteLoopsList)
+	plt.savefig('Plots/infloops.png')
+	# plt.figure()
+	# amountOfLoopsList = np.arange(amountOfLoops)
+	# plt.plot(amountOfLoopsList, timePerLoop)
+	# plt.savefig('Plots/time.png')
+	plt.show()
+
+modelFile = 'Models/SavedModel.txt'
+def saveModel():
+	global modelFile
+	all_param_values = lasagne.layers.get_all_param_values(l_out)
+	with open(modelFile, 'w') as f:
+		pickle.dump(all_param_values, f)
+
+def loadModel():
+	global modelFile
+	with open(modelFile, 'r') as f:
+		loadedParams = pickle.load(f)
+	lasagne.layers.set_all_param_values(l_out, loadedParams)
+	lasagne.layers.set_all_param_values(l_out_target, loadedParams)
+
+outputFile1  = 'Models/SavedReplaymemory.npy'
+outputFile2  = 'Models/amountOfMovesTraining.npy'
+outputFile3  = 'Models/amountOfEpisodesTraining.npy'
+outputFile4  = 'Models/cumulatedLossEpisodeList.npy'
+outputFile5  = 'Models/averageLossTraining.npy'
+outputFile6  = 'Models/amountOfEpisodesTest.npy'
+outputFile7  = 'Models/lengthEpisodeList.npy'
+outputFile8  = 'Models/averageLengthEpisodeList.npy'
+outputFile9  = 'Models/bestQValues.npy'
+outputFile10  = 'Models/epsilon.npy'
+
+outputFile11 = 'Models/iterationsToTrain.npy'
+outputFile12 = 'Models/cumulatedLossTrain.npy'
+outputFile13 = 'Models/cumulatedLossEpisode.npy'
+outputFile14 = 'Models/accumulatedLengthEpisode.npy'
+outputFile15 = 'Models/averageLengthEpisode.npy'
+outputFile16 = 'Models/amountOfInfiniteLoops.npy'
+outputFile17 = 'Models/amountOfInfiniteLoopsList.npy'
+outputFile18 = 'Models/amountOfLoops.npy'
+outputFile19 = 'Models/timePerLoop.npy'
+
+def saveEvaluation():
+	global replayMemory
+
+	global amountOfMovesTraining
+	global amountOfEpisodesTraining
+	global cumulatedLossEpisodeList
+	global averageLossTraining
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global averageLengthEpisodeList
+	global bestQValues
+
+	global epsilon
+
+	global iterationsToTrain
+	global cumulatedLossTrain
+	global cumulatedLossEpisode
+	global accumulatedLengthEpisode
+	global averageLengthEpisode
+	global amountOfInfiniteLoops
+	global amountOfInfiniteLoopsList
+	global amountOfLoops
+	global timePerLoop
+
+	np.save(outputFile1, replayMemory)
+	np.save(outputFile2, amountOfMovesTraining)
+	np.save(outputFile3, amountOfEpisodesTraining)
+	np.save(outputFile4, cumulatedLossEpisodeList)
+	np.save(outputFile5, averageLossTraining)
+	np.save(outputFile6, amountOfEpisodesTest)
+	np.save(outputFile7, lengthEpisodeList)
+	np.save(outputFile8, averageLengthEpisodeList)
+	np.save(outputFile9, bestQValues)
+	np.save(outputFile10, epsilon)
+	np.save(outputFile11, iterationsToTrain)
+	np.save(outputFile12, cumulatedLossTrain)
+	np.save(outputFile13, cumulatedLossEpisode)
+	np.save(outputFile14, accumulatedLengthEpisode)
+	np.save(outputFile15, averageLengthEpisode)
+	np.save(outputFile16, amountOfInfiniteLoops)
+	np.save(outputFile17, amountOfInfiniteLoopsList)
+	np.save(outputFile18, amountOfLoops)
+	np.save(outputFile19, timePerLoop)
+
+
+def loadEvaluation():
+	global replayMemory
+
+	global amountOfMovesTraining
+	global amountOfEpisodesTraining
+	global cumulatedLossEpisodeList
+	global averageLossTraining
+	global amountOfEpisodesTest
+	global lengthEpisodeList
+	global averageLengthEpisodeList
+	global bestQValues
+
+	global epsilon
+
+	global iterationsToTrain
+	global cumulatedLossTrain
+	global cumulatedLossEpisode
+	global accumulatedLengthEpisode
+	global averageLengthEpisode
+	global amountOfInfiniteLoops
+	global amountOfInfiniteLoopsList
+	global amountOfLoops
+	global timePerLoop
+
+	replayMemory = np.ndarray.tolist(np.load(outputFile1))
+	amountOfMovesTraining = np.ndarray.tolist(np.load(outputFile2))
+	amountOfEpisodesTraining = np.ndarray.tolist(np.load(outputFile3))
+	cumulatedLossEpisodeList = np.ndarray.tolist(np.load(outputFile4))
+	averageLossTraining = np.ndarray.tolist(np.load(outputFile5))
+	amountOfEpisodesTest = np.ndarray.tolist(np.load(outputFile6))
+	lengthEpisodeList = np.ndarray.tolist(np.load(outputFile7))
+	averageLengthEpisodeList = np.ndarray.tolist(np.load(outputFile8))
+	bestQValues = np.ndarray.tolist(np.load(outputFile9))
+	epsilon = np.ndarray.tolist(np.load(outputFile10))
+	iterationsToTrain = np.ndarray.tolist(np.load(outputFile11))
+	cumulatedLossTrain = np.ndarray.tolist(np.load(outputFile12))
+	cumulatedLossEpisode = np.ndarray.tolist(np.load(outputFile13))
+	accumulatedLengthEpisode = np.ndarray.tolist(np.load(outputFile14))
+	averageLengthEpisode = np.ndarray.tolist(np.load(outputFile15))
+	amountOfInfiniteLoops = np.ndarray.tolist(np.load(outputFile16))
+	amountOfInfiniteLoopsList = np.ndarray.tolist(np.load(outputFile17))
+	amountOfLoops = np.ndarray.tolist(np.load(outputFile18))
+	timePerLoop = np.ndarray.tolist(np.load(outputFile19))
+
+def train():
+	global amountOfLoops
+	global timePerLoop
+	#global iterationNumber
+	#
+	#loadModel()
+	# probleemje met np inladen enzo. zie f predict
+	#loadEvaluation()
+	amountOfLoopsJ = 40
+	amountOfLoops += amountOfLoopsJ
+	iterations = 102
+
+	startTime = time.clock()
+	#amountOfInfiniteLoopsBase, averageAmountOfMovesBase, winsBase, drawsBase = test(100, False, False)
+	for i in range(amountOfLoopsJ):
+		print i
+		print "epsilon = ", epsilon
+		t0 = time.clock()
+		trainLoop(iterations)
+		evaluateDuringTraining(20)
+		saveModel()
+		saveEvaluation()
+		print time.clock() - t0, "seconds process time"
+		# dit heeft geen zin, behalve als hij er uit komt.
+		if time.clock() - t0 > 500:
+			print 'way to long'
+			print '.'
+		timePerLoop.append(time.clock() - t0)
+		print '-' * 50
+
+	#amountOfInfiniteLoops, averageAmountOfMoves, wins, draws = test(100, False, True)
+	# pretty print
+	#test(10, True, True)
+
+	endTime = time.clock()
+	print '-' * 50
+	# print endTime - startTime, "seconds total time"
+	# print '-' * 50
+	# print "infinite loops baseline = ", amountOfInfiniteLoopsBase
+	# print "moves till won baseline = " , averageAmountOfMovesBase
+	# print "wins in winning positions baseline = ", winsBase
+	# print "wins in drawn positions baseline = ", drawsBase
+	# print '-' * 50
+	# print "infinite loops = ", amountOfInfiniteLoops
+	# print "moves till won = " , averageAmountOfMoves
+	# print "wins in winning positions baseline = ", wins
+	# print "wins in drawn positions baseline  = ", draws
+
+	evaluate()
+
+#train()
+
+
+# nu opeens weer sneller? Wat gebeurt er?
+
+# overmorgen x quars fixen en elke iteratie plotje printen INZICHT, dan kun je bugs wel vinden
+# misschien wel a te groot ofzo.
+
+# tracken hoe vaak hij random zet doet. (heel misschien die games niet opslaan)
+
+# evaluatie eind wel helemaal goed
+
+# evaluatie opslaan misschien aanpassen, als x q niet lukt.
+
+# sowieso evaluatie amount of moves to win
+
+# even teryg veranderen naar randomKing en kijken of hij leert (check!)
+
+# loss gaat omhoog, a maakte niet echt verschil, kan nog lager proberen?..
+
+# haal 50 rules reward weg, dat begrijpt ie niet zonder input van aantal zetten, misschien dat
+# # q vals daarom zo omlaag gaan.
+
+# vandaag om 4 uur paar testjes en naar matthias voor weekend.
+
+# print states en alles.
+
+
+# moet ik de pion alles op 0 zetten als geslagen?
+
+
+
+boardSetupPawn()
+
+print board
+#
+#
+# boardSetupPawn2()
+# printBoard()
+# print board
+# for i in range(3):
+# 	state = board.flatten()
+# 	performAction(epsilon, np.array([state]))
+# 	printBoard()
+# 	print board
+# 	moveBlackKing(200)
+# 	printBoard()
+# 	print board
