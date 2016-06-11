@@ -37,8 +37,9 @@ kCoors = (0,0)
 PCoors = (0,0)
 boardSize = 8
 saveNumber = 0
-maxNodesEngine = 200
+maxNodesEngine = 2000
 draw50Moves = 0
+randomMoves = 0.0
 
 boardSunFish = list(
 	'         \n'  # 0 -  9
@@ -517,6 +518,7 @@ def moveBlackKing(maxn):
 	global PieceNumber
 	global board
 	global draw50Moves
+	global randomMoves
 	# transforms board to sunfish representation
 	boardSun = boardToSunFish()
 	# do the other params make sense?
@@ -540,6 +542,7 @@ def moveBlackKing(maxn):
 			if isLegal() == False:
 				setCoor('k', xOld, yOld)
 				moveBlackKingRandom()
+				randomMoves += 1
 				print 'Black did a random move'
 			else:
 				board[1][yOld][xOld] = noPieceNumber
@@ -596,9 +599,9 @@ def isTerminalState():
 			return 'won'
 		elif stalemate():
 			return 'drawn'
-		elif draw50Moves > 50:
-			print '50 move rule'
-			return 'drawn'
+		# elif draw50Moves > 50:
+		# 	print '50 move rule'
+		# 	return 'drawn'
 		else:
 			return False
 	else:
@@ -629,7 +632,7 @@ def stalemate():
 # DEEP REINFORCEMENT LEARNING
 #######################
 batchSize = 32
-learningRate = 0.0001
+learningRate = 0.001
 
 boardSetupPawn()
 # print board
@@ -761,21 +764,19 @@ def fillRM():
 	global cumulatedLossEpisode
 	global learningRate
 
-	global maxNodesEngine
-	global draw50Moves
-
 	amountOfMovesTraining += 1
 	#epsilon = 1 - ((float(amountOfMovesTraining)-((1/10)*iterationsToTrain))/iterationsToTrain)
-	if amountOfMovesTraining % 1000 == 0 and amountOfMovesTraining > 0:
+	if amountOfMovesTraining % 6000 == 0 and amountOfMovesTraining > 0:
 		epsilon = max(0.1, epsilon - 0.1)
 
-	# if amountOfMovesTraining % 1000 == 0 and amountOfMovesTraining > 0:
+	# if amountOfMovesTraining % 6000 == 0 and amountOfMovesTraining > 0:
 	# 	learningRate -= 0.001
 
 	state = board.flatten()
 	move, moveLegal = performAction(epsilon, np.array([state]))
 	# if K made a move, only then k makes a move too
 	if moveLegal == True:
+		#moveBlackKingRandom()
 		moveBlackKing(maxNodesEngine)
 	newState = board.flatten()
 	if moveLegal == False and stalemate() == False:
@@ -824,11 +825,15 @@ def trainOnRM():
 			rewards.append(replayMemory[randomNumber][2])
 			newStates.append(replayMemory[randomNumber][3])
 			discounts.append(replayMemory[randomNumber][4])
-			#print replayMemory[randomNumber][3].shape
-			targetMove = f_predict_target(np.array([replayMemory[randomNumber][3]]))
+			targetMove = f_predict_target(np.expand_dims(replayMemory[randomNumber][3],0))
 			targetMove = targetMove[0]
 			targetMoves.append(targetMove)
 			# update params
+		#print network_calc(states, moves)
+		#print target_calc(newStates, rewards, discounts)
+		#print discounts
+		#print moves
+		#print targetMoves
 		loss = f_train(states, moves, newStates, rewards, discounts, targetMoves)
 		cumulatedLossEpisode += loss
 
@@ -843,18 +848,18 @@ def trainLoop(iterations):
 	global cumulatedLossEpisodeList
 
 	global bestQValues
-	updateTarget = 0
+	counter = 0
 
 	for i in range(iterations):
 		amountOfEpisodesTraining += 1
 		cumulatedLossEpisode = 0
 
 		# update target network
-		updateTarget += 1
-		if updateTarget == 100:
+		counter += 1
+		if counter == 100:
 			all_param_values = lasagne.layers.get_all_param_values(l_out)
 			lasagne.layers.set_all_param_values(l_out_target, all_param_values)
-			updateTarget = 0
+			counter = 0
 
 		# to play games
 		boardSetupPawn()
@@ -880,6 +885,7 @@ def moveBothKingsSaveBoard():
 		move, moveLegal = performAction(1, state)
 	boardToImage()
 	printBoard()
+	print boardToSunFish()
 	moveBlackKing(maxNodesEngine)
 	boardToImage()
 	printBoard()
@@ -896,6 +902,7 @@ def moveBothKingsTest(learned):
 	while moveLegal == False and stalemate() == False:
 		move, moveLegal = performAction(1, state)
 	moveBlackKing(maxNodesEngine)
+	#moveBlackKingRandom()
 
 # to test, save option to save image of board in file, learned option to use NN or not
 def test(iterations, save, learned):
@@ -954,7 +961,7 @@ def test(iterations, save, learned):
 	print winningPositions
 	print drawnPositions
 	print '-' * 50
-	return amountOfInfiniteLoops, movesToWin/wins, wonInWinningPosition/winningPositions, wonInDrawnPosition/drawnPositions
+	return amountOfInfiniteLoops, movesToWin, wins, wonInWinningPosition, winningPositions, wonInDrawnPosition, drawnPositions
 
 # to evaluate during training
 def evaluateDuringTraining(iterations):
@@ -1159,22 +1166,33 @@ def loadEvaluation():
 def train():
 	global amountOfLoops
 	global timePerLoop
+	global amountOfMovesTraining
+	global randomMoves
+	global amountOfEpisodesTraining
+	global averageLossTraining
+	global cumulatedLossTrain
+	global amountOfEpisodesTraining
 	#global iterationNumber
 	#
 	#loadModel()
 	# probleemje met np inladen enzo. zie f predict
 	#loadEvaluation()
-	amountOfLoopsJ = 20
+	amountOfLoopsJ = 10
 	amountOfLoops += amountOfLoopsJ
 	iterations = 102
 
 	startTime = time.clock()
-	#amountOfInfiniteLoopsBase, averageAmountOfMovesBase, winsBase, drawsBase = test(100, False, False)
+	amountOfInfiniteLoopsBase, AmountOfMovesBase, winsBase, winsInWinningBase, winningPosBase, winsInDrawnBase, drawnPosBase = test(100, False, False)
+	randomMoves = 0.0
 	for i in range(amountOfLoopsJ):
-		print i
-		print "epsilon = ", epsilon
 		t0 = time.clock()
 		trainLoop(iterations)
+		print i
+		print "epsilon = ", epsilon
+		print "average loss = ", cumulatedLossTrain / amountOfEpisodesTraining
+		print "rate of random moves by SunFish per training move= ", randomMoves / amountOfMovesTraining
+		print "amount of games where SunFish did random move = ", randomMoves / amountOfEpisodesTraining
+
 		evaluateDuringTraining(20)
 		saveModel()
 		saveEvaluation()
@@ -1186,23 +1204,27 @@ def train():
 		timePerLoop.append(time.clock() - t0)
 		print '-' * 50
 
-	#amountOfInfiniteLoops, averageAmountOfMoves, wins, draws = test(100, False, True)
+	print "rate of random moves by SunFish per training move= ", randomMoves/amountOfMovesTraining
+	print "amount of games where SunFish did random move = ", randomMoves/amountOfEpisodesTraining
+
+	amountOfInfiniteLoops, AmountOfMoves, wins, winsInWinning, winningPos, winsInDrawn, drawnPos = test(100, False, True)
 	# pretty print
-	#test(10, True, True)
+	test(15, True, True)
 
 	endTime = time.clock()
 	print '-' * 50
-	# print endTime - startTime, "seconds total time"
-	# print '-' * 50
-	# print "infinite loops baseline = ", amountOfInfiniteLoopsBase
-	# print "moves till won baseline = " , averageAmountOfMovesBase
-	# print "wins in winning positions baseline = ", winsBase
-	# print "wins in drawn positions baseline = ", drawsBase
-	# print '-' * 50
-	# print "infinite loops = ", amountOfInfiniteLoops
-	# print "moves till won = " , averageAmountOfMoves
-	# print "wins in winning positions baseline = ", wins
-	# print "wins in drawn positions baseline  = ", draws
+	print endTime - startTime, "seconds total time"
+	print '-' * 50
+	print "infinite loops baseline = ", amountOfInfiniteLoopsBase
+	print "moves till won baseline = " , AmountOfMovesBase/winsBase
+	print "wins in winning positions baseline = ", winsInWinningBase/winningPosBase
+	print "wins in drawn positions baseline = ", winsInDrawnBase/drawnPosBase
+	print '-' * 50
+	print "infinite loops after learning= ", amountOfInfiniteLoops
+	print "moves till won after learning = " , AmountOfMoves/wins
+	print "wins in winning positions after learning = ", winsInWinning/winningPos
+	print "wins in drawn positions after learning = ", winsInDrawn/drawnPos
+
 
 	evaluate()
 
@@ -1222,13 +1244,33 @@ train()
 
 # sowieso evaluatie amount of moves to win
 
+# even teryg veranderen naar randomKing en kijken of hij leert (check!)
+
+# loss gaat omhoog, a maakte niet echt verschil, kan nog lager proberen?..
+
+# haal 50 rules reward weg, dat begrijpt ie niet zonder input van aantal zetten, misschien dat
+# # q vals daarom zo omlaag gaan.
+
+# vandaag om 4 uur paar testjes en naar matthias voor weekend.
+
+# print states en alles.
 
 
-#boardSetupPawn()
+# moet ik de pion alles op 0 zetten als geslagen?
+
+
+# Werkt het nu? Volgens mij wel. Maar het lijkt wel alsof hij minder wint als ie langer traint.
+# Voor inzicht, amount of winns in winning pos tracking, daar gaat het om
+# amount of moves to win
+# av amount of infinite loops
+# sunfish doet hele rare zetten.
 
 
 
 
+
+#
+#
 # boardSetupPawn2()
 # printBoard()
 # print board
