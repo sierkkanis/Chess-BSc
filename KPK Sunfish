@@ -37,7 +37,7 @@ kCoors = (0,0)
 PCoors = (0,0)
 boardSize = 8
 saveNumber = 0
-maxNodesEngine = 2000
+maxNodesEngine = 200
 draw50Moves = 0
 randomMoves = 0.0
 
@@ -250,13 +250,19 @@ def setPieceRandom(piece):
 		yRandom = random.randint(0,boardSize-1)
 		onFreeSquare = setPiece(piece, xRandom, yRandom)
 
-# used for the pawn
-def setPieceSemiRandom(piece):
+# random with given boundaries
+def setPieceSemiRandom(piece, x1, x2, y1, y2):
 	onFreeSquare = False
+	# if the coordinates given are out of board
+	if x1 < 0:
+		x1 = 0
+	if x2 > 7:
+		x2 = 7
 	# checks whether square is free to add piece.
 	while onFreeSquare == False:
-		xRandom = random.randint(0,7)
-		yRandom = random.randint(1,6)
+
+		xRandom = random.randint(x1,x2)
+		yRandom = random.randint(y1,y2)
 		onFreeSquare = setPiece(piece, xRandom, yRandom)
 
 # translates my board representation to that over engine SunFish
@@ -298,11 +304,48 @@ def boardSetupStalemate():
 def boardSetupPawn():
 	global side
 	boardInit(3)
-	setPieceSemiRandom('P')
+	setPieceSemiRandom('P', 0,7,1,6)
 	# setPiece('P', 4,0)
 	# setPiece('K',4,4)
 	setPieceRandom('K')
 	setPieceRandom('k')
+	if isLegal() == False:
+		boardSetupPawn()
+	side = True
+
+def boardSetupPawnEasy():
+	global side
+	boardInit(3)
+	setPieceSemiRandom('P', 0,7,1,6)
+	xP, yP = getCoor('P')
+
+	setPieceRandom('K')
+	# always further down than pawn, so can't reach it.
+	setPieceSemiRandom('k', 0, 7, yP+1, 7)
+	if isLegal() == False:
+		boardSetupPawn()
+	side = True
+
+def boardSetupPawnHard():
+	global side
+	boardInit(3)
+	setPieceSemiRandom('P', 0,7,3,6)
+	xP, yP = getCoor('P')
+
+	setPieceSemiRandom('K', xP -2, xP +2, yP , yP +1)
+	setPieceSemiRandom('k', xP-2, xP+2, 0, yP)
+	if isLegal() == False:
+		boardSetupPawn()
+	side = True
+
+def boardSetupPawnMedium():
+	global side
+	boardInit(3)
+	setPieceSemiRandom('P', 0,7,3,6)
+	xP, yP = getCoor('P')
+
+	setPieceSemiRandom('K', xP -2, xP +2, yP -2 , yP -1)
+	setPieceSemiRandom('k', xP-2, xP+2, yP -1, yP)
 	if isLegal() == False:
 		boardSetupPawn()
 	side = True
@@ -883,11 +926,10 @@ def moveBothKingsSaveBoard():
 	move, moveLegal = performAction(0, state)
 	while moveLegal == False and stalemate() == False:
 		move, moveLegal = performAction(1, state)
-	boardToImage()
+	#boardToImage()
 	printBoard()
-	print boardToSunFish()
 	moveBlackKing(maxNodesEngine)
-	boardToImage()
+	#boardToImage()
 	printBoard()
 
 # moves both kings
@@ -905,9 +947,8 @@ def moveBothKingsTest(learned):
 	#moveBlackKingRandom()
 
 # to test, save option to save image of board in file, learned option to use NN or not
-def test(iterations, save, learned):
+def test(iterations, save, learned, difficulty):
 	amountOfInfiniteLoops = 0
-	amountOfMoves = 0
 	wins = 0
 	winningPositions = 0.0
 	draws = 0
@@ -918,7 +959,14 @@ def test(iterations, save, learned):
 
 	movesToWin = 0.0
 	for i in range(iterations):
-		boardSetupPawn()
+		if difficulty == 'easy':
+			boardSetupPawnEasy()
+		if difficulty == 'medium':
+			boardSetupPawnMedium()
+		if difficulty == 'hard':
+			boardSetupPawnHard()
+		if difficulty == 'None':
+			boardSetupPawn()
 		score = boardEvaluation()
 		if score == 1:
 			winningPositions += 1
@@ -943,7 +991,6 @@ def test(iterations, save, learned):
 				moveBothKingsTest(learned)
 
 			counter += 1
-			amountOfMoves += 1
 			lengthEpisode += 1
 
 		if isTerminalState() == 'won':
@@ -963,8 +1010,78 @@ def test(iterations, save, learned):
 	print '-' * 50
 	return amountOfInfiniteLoops, movesToWin, wins, wonInWinningPosition, winningPositions, wonInDrawnPosition, drawnPositions
 
+
+
+drawnPositionsEv = 0.0
+wonInDrawnPositionEv = 0.0
+drawsEv = 0
+
+
+averageLengthToWinList = []
+accumulatedLengthToWin = 0.0
+winsEv = 0
+
+percentageWoninWinOverAllWinPosList = []
+winningPositionsEv = 0.0
+wonInWinningPositionEv = 0.0
+
 # to evaluate during training
 def evaluateDuringTraining(iterations):
+
+	global drawnPositionsEv
+	global wonInDrawnPositionEv
+	global drawsEv
+
+	global averageLengthToWinList
+	global accumulatedLengthToWin
+	global winsEv
+
+	global percentageWoninWinOverAllWinPosList
+	global winningPositionsEv
+	global wonInWinningPositionEv
+
+	global maxNodesEngine
+
+	amountOfInfiniteLoops = 0
+	amountOfMoves = 0
+
+	for i in range(iterations):
+		boardSetupPawn()
+		score = boardEvaluation()
+		if score == 1:
+			winningPositionsEv += 1
+		if score == 0:
+			drawnPositionsEv += 1
+
+		counter = 0
+		lengthEpisode = 0
+		while isTerminalState() == False and counter < 50:
+			counter += 1
+			amountOfMoves += 1
+			lengthEpisode += 1
+
+			moveBothKingsTest(True)
+
+		if isTerminalState() == 'won':
+			if score == 1:
+				wonInWinningPositionEv += 1
+			if score == 0:
+				wonInDrawnPositionEv += 1
+			winsEv += 1
+			accumulatedLengthToWin += lengthEpisode
+			averageLengthToWinList.append(accumulatedLengthToWin / winsEv)
+		if isTerminalState() == 'drawn':
+			drawsEv += 1
+
+		#lengthEpisodeList.append(lengthEpisode)
+		if score == 1:
+			percentageWoninWinOverAllWinPosList.append(wonInWinningPositionEv / winningPositionsEv)
+
+
+		#amountOfInfiniteLoopsList.append(amountOfInfiniteLoops)
+
+
+def evaluateDuringTraining2(iterations):
 	global amountOfEpisodesTest
 	global lengthEpisodeList
 	global accumulatedLengthEpisode
@@ -1008,12 +1125,18 @@ def evaluate():
 	global amountOfLoops
 	global timePerLoop
 
+	global percentageWoninWinOverAllWinPosList
+	global averageLengthToWinList
+
 	#evaluation
 	# plot q vals of best move in all episodes
 	amountOfEpisodesTrainingList = np.arange(amountOfEpisodesTraining)
 	amountOfMovesTrainingList = np.arange(amountOfMovesTraining)
 
 	plt.figure()
+	plt.title('Q values')
+	plt.xlabel('Moves')
+	plt.ylabel('Highest Q value of position')
 	plt.plot(amountOfMovesTrainingList, bestQValues)
 	plt.savefig('Plots/bestQ.png')
 	#plt.show()
@@ -1021,22 +1144,47 @@ def evaluate():
 	# plt.figure()
 	# plt.plot(amountOfEpisodesTrainingList, cumulatedLossEpisodeList)
 	plt.figure()
+	plt.title('Loss')
+	plt.xlabel('Games')
+	plt.ylabel('Average loss')
 	plt.plot(amountOfEpisodesTrainingList[500:], averageLossTraining[500:])
 	plt.savefig('Plots/AvLoss.png')
-	amountOfEpisodesTestList = np.arange(amountOfEpisodesTest)
-	plt.figure()
-	plt.plot(amountOfEpisodesTestList[30:], lengthEpisodeList[30:])
-	plt.savefig('Plots/moves.png')
-	plt.figure()
-	plt.plot(amountOfEpisodesTestList, averageLengthEpisodeList)
-	plt.savefig('Plots/avmoves.png')
-	plt.figure()
-	plt.plot(amountOfEpisodesTestList, amountOfInfiniteLoopsList)
-	plt.savefig('Plots/infloops.png')
+	# amountOfEpisodesTestList = np.arange(amountOfEpisodesTest)
 	# plt.figure()
-	# amountOfLoopsList = np.arange(amountOfLoops)
-	# plt.plot(amountOfLoopsList, timePerLoop)
-	# plt.savefig('Plots/time.png')
+	# plt.plot(amountOfEpisodesTestList[30:], lengthEpisodeList[30:])
+	# plt.savefig('Plots/moves.png')
+	# plt.figure()
+	# plt.plot(amountOfEpisodesTestList, averageLengthEpisodeList)
+	# plt.savefig('Plots/avmoves.png')
+	# plt.figure()
+	# plt.plot(amountOfEpisodesTestList, amountOfInfiniteLoopsList)
+	# plt.savefig('Plots/infloops.png')
+
+
+	amountOfWinsList = np.arange(winsEv)
+	amountOfWinninPosList = np.arange(winningPositionsEv)
+
+	plt.figure()
+	plt.title('Winning-rate during training')
+	plt.xlabel('Winning positions')
+	plt.ylabel('Average won in winning positions in percentage')
+	plt.plot(amountOfWinninPosList, percentageWoninWinOverAllWinPosList)
+	plt.savefig('Plots/winningRate.png')
+
+	plt.figure()
+	plt.title('Length to win during training')
+	plt.xlabel('Wins')
+	plt.ylabel('Average length to win')
+	plt.plot(amountOfWinsList, averageLengthToWinList)
+	plt.savefig('Plots/lengthToWin.png')
+
+	plt.figure()
+	amountOfLoopsList = np.arange(amountOfLoops)
+	plt.title('Time per loop')
+	plt.xlabel('Games / 100')
+	plt.ylabel('Time')
+	plt.plot(amountOfLoopsList, timePerLoop)
+	plt.savefig('Plots/time.png')
 	plt.show()
 
 modelFile = 'Models/SavedModel.txt'
@@ -1053,14 +1201,40 @@ def loadModel():
 	lasagne.layers.set_all_param_values(l_out, loadedParams)
 	lasagne.layers.set_all_param_values(l_out_target, loadedParams)
 
+
+# # unused
+# global amountOfEpisodesTest
+
+# global lengthEpisodeList
+# global accumulatedLengthEpisode
+# global averageLengthEpisodeList
+
+# global averageLengthEpisode
+# global amountOfInfiniteLoops
+# global amountOfInfiniteLoopsList
+
+# cumulatedLossEpisodeList
+# amountOfInfiniteLoopsList
+# #
+
+# global drawnPositionsEv
+# global wonInDrawnPositionEv
+# global drawsEv
+#
+# global averageLengthToWinList
+# global accumulatedLengthToWin
+# global winsEv
+#
+# global percentageWoninWinOverAllWinPosList
+# global winningPositionsEv
+# global wonInWinningPositionEv
+
 outputFile1  = 'Models/SavedReplaymemory.npy'
 outputFile2  = 'Models/amountOfMovesTraining.npy'
 outputFile3  = 'Models/amountOfEpisodesTraining.npy'
-outputFile4  = 'Models/cumulatedLossEpisodeList.npy'
+
 outputFile5  = 'Models/averageLossTraining.npy'
-outputFile6  = 'Models/amountOfEpisodesTest.npy'
-outputFile7  = 'Models/lengthEpisodeList.npy'
-outputFile8  = 'Models/averageLengthEpisodeList.npy'
+
 outputFile9  = 'Models/bestQValues.npy'
 outputFile10  = 'Models/epsilon.npy'
 
@@ -1069,10 +1243,22 @@ outputFile12 = 'Models/cumulatedLossTrain.npy'
 outputFile13 = 'Models/cumulatedLossEpisode.npy'
 outputFile14 = 'Models/accumulatedLengthEpisode.npy'
 outputFile15 = 'Models/averageLengthEpisode.npy'
-outputFile16 = 'Models/amountOfInfiniteLoops.npy'
-outputFile17 = 'Models/amountOfInfiniteLoopsList.npy'
+
 outputFile18 = 'Models/amountOfLoops.npy'
 outputFile19 = 'Models/timePerLoop.npy'
+
+
+outputFile4  = 'Models/drawnPositionsEv.npy'
+outputFile6  = 'Models/wonInDrawnPositionEv.npy'
+outputFile7  = 'Models/drawsEv.npy'
+
+outputFile8  = 'Models/averageLengthToWinList.npy'
+outputFile16 = 'Models/accumulatedLengthToWin.npy'
+outputFile17 = 'Models/winsEv.npy'
+
+outputFile21 = 'Models/percentageWoninWinOverAllWinPosList.npy'
+outputFile22 = 'Models/winningPositionsEv.npy'
+outputFile23 = 'Models/wonInWinningPositionEv.npy'
 
 def saveEvaluation():
 	global replayMemory
@@ -1098,14 +1284,26 @@ def saveEvaluation():
 	global amountOfLoops
 	global timePerLoop
 
+	global drawnPositionsEv
+	global wonInDrawnPositionEv
+	global drawsEv
+
+	global averageLengthToWinList
+	global accumulatedLengthToWin
+	global winsEv
+
+	global percentageWoninWinOverAllWinPosList
+	global winningPositionsEv
+	global wonInWinningPositionEv
+
 	np.save(outputFile1, replayMemory)
 	np.save(outputFile2, amountOfMovesTraining)
 	np.save(outputFile3, amountOfEpisodesTraining)
-	np.save(outputFile4, cumulatedLossEpisodeList)
+	np.save(outputFile4, drawnPositionsEv)
 	np.save(outputFile5, averageLossTraining)
-	np.save(outputFile6, amountOfEpisodesTest)
-	np.save(outputFile7, lengthEpisodeList)
-	np.save(outputFile8, averageLengthEpisodeList)
+	np.save(outputFile6, wonInDrawnPositionEv)
+	np.save(outputFile7, drawsEv)
+	np.save(outputFile8, averageLengthToWinList)
 	np.save(outputFile9, bestQValues)
 	np.save(outputFile10, epsilon)
 	np.save(outputFile11, iterationsToTrain)
@@ -1113,10 +1311,13 @@ def saveEvaluation():
 	np.save(outputFile13, cumulatedLossEpisode)
 	np.save(outputFile14, accumulatedLengthEpisode)
 	np.save(outputFile15, averageLengthEpisode)
-	np.save(outputFile16, amountOfInfiniteLoops)
-	np.save(outputFile17, amountOfInfiniteLoopsList)
+	np.save(outputFile16, accumulatedLengthToWin)
+	np.save(outputFile17, winsEv)
 	np.save(outputFile18, amountOfLoops)
 	np.save(outputFile19, timePerLoop)
+	np.save(outputFile21, percentageWoninWinOverAllWinPosList)
+	np.save(outputFile22, winningPositionsEv)
+	np.save(outputFile23, wonInWinningPositionEv)
 
 
 def loadEvaluation():
@@ -1143,14 +1344,26 @@ def loadEvaluation():
 	global amountOfLoops
 	global timePerLoop
 
+	global drawnPositionsEv
+	global wonInDrawnPositionEv
+	global drawsEv
+
+	global averageLengthToWinList
+	global accumulatedLengthToWin
+	global winsEv
+
+	global percentageWoninWinOverAllWinPosList
+	global winningPositionsEv
+	global wonInWinningPositionEv
+
 	replayMemory = np.ndarray.tolist(np.load(outputFile1))
 	amountOfMovesTraining = np.ndarray.tolist(np.load(outputFile2))
 	amountOfEpisodesTraining = np.ndarray.tolist(np.load(outputFile3))
-	cumulatedLossEpisodeList = np.ndarray.tolist(np.load(outputFile4))
+	drawnPositionsEv = np.ndarray.tolist(np.load(outputFile4))
 	averageLossTraining = np.ndarray.tolist(np.load(outputFile5))
-	amountOfEpisodesTest = np.ndarray.tolist(np.load(outputFile6))
-	lengthEpisodeList = np.ndarray.tolist(np.load(outputFile7))
-	averageLengthEpisodeList = np.ndarray.tolist(np.load(outputFile8))
+	wonInDrawnPositionEv = np.ndarray.tolist(np.load(outputFile6))
+	drawsEv = np.ndarray.tolist(np.load(outputFile7))
+	averageLengthToWinList = np.ndarray.tolist(np.load(outputFile8))
 	bestQValues = np.ndarray.tolist(np.load(outputFile9))
 	epsilon = np.ndarray.tolist(np.load(outputFile10))
 	iterationsToTrain = np.ndarray.tolist(np.load(outputFile11))
@@ -1158,10 +1371,14 @@ def loadEvaluation():
 	cumulatedLossEpisode = np.ndarray.tolist(np.load(outputFile13))
 	accumulatedLengthEpisode = np.ndarray.tolist(np.load(outputFile14))
 	averageLengthEpisode = np.ndarray.tolist(np.load(outputFile15))
-	amountOfInfiniteLoops = np.ndarray.tolist(np.load(outputFile16))
-	amountOfInfiniteLoopsList = np.ndarray.tolist(np.load(outputFile17))
+	accumulatedLengthToWin = np.ndarray.tolist(np.load(outputFile16))
+	winsEv = np.ndarray.tolist(np.load(outputFile17))
 	amountOfLoops = np.ndarray.tolist(np.load(outputFile18))
 	timePerLoop = np.ndarray.tolist(np.load(outputFile19))
+
+	percentageWoninWinOverAllWinPosList = np.ndarray.tolist(np.load(outputFile21))
+	winningPositionsEv = np.ndarray.tolist(np.load(outputFile22))
+	wonInWinningPositionEv = np.ndarray.tolist(np.load(outputFile23))
 
 def train():
 	global amountOfLoops
@@ -1172,17 +1389,22 @@ def train():
 	global averageLossTraining
 	global cumulatedLossTrain
 	global amountOfEpisodesTraining
+
+	global winningPositionsEv
+	global drawnPositionsEv
 	#global iterationNumber
 	#
-	#loadModel()
+	loadModel()
 	# probleemje met np inladen enzo. zie f predict
-	#loadEvaluation()
-	amountOfLoopsJ = 10
+	loadEvaluation()
+	amountOfLoopsJ = 50
 	amountOfLoops += amountOfLoopsJ
 	iterations = 102
 
+	testGames = 1000
+
 	startTime = time.clock()
-	amountOfInfiniteLoopsBase, AmountOfMovesBase, winsBase, winsInWinningBase, winningPosBase, winsInDrawnBase, drawnPosBase = test(100, False, False)
+	#amountOfInfiniteLoopsBase, AmountOfMovesBase, winsBase, winsInWinningBase, winningPosBase, winsInDrawnBase, drawnPosBase = test(testGames, False, False, 'None')
 	randomMoves = 0.0
 	for i in range(amountOfLoopsJ):
 		t0 = time.clock()
@@ -1194,39 +1416,71 @@ def train():
 		print "amount of games where SunFish did random move = ", randomMoves / amountOfEpisodesTraining
 
 		evaluateDuringTraining(20)
+		print time.clock() - t0, "seconds process time"
+		timePerLoop.append((time.clock() - t0))
+
 		saveModel()
 		saveEvaluation()
-		print time.clock() - t0, "seconds process time"
-		# dit heeft geen zin, behalve als hij er uit komt.
-		if time.clock() - t0 > 500:
-			print 'way to long'
-			print '.'
-		timePerLoop.append(time.clock() - t0)
 		print '-' * 50
 
 	print "rate of random moves by SunFish per training move= ", randomMoves/amountOfMovesTraining
 	print "amount of games where SunFish did random move = ", randomMoves/amountOfEpisodesTraining
 
-	amountOfInfiniteLoops, AmountOfMoves, wins, winsInWinning, winningPos, winsInDrawn, drawnPos = test(100, False, True)
+	#amountOfInfiniteLoops, AmountOfMoves, wins, winsInWinning, winningPos, winsInDrawn, drawnPos = test(testGames, False, True, 'None')
+	# amountOfInfiniteLoopsEasy, AmountOfMovesEasy, winsEasy, winsInWinningEasy, winningPosEasy, winsInDrawnEasy, drawnPosEasy = test(testGames, False, True, 'easy')
+	# amountOfInfiniteLoopsMedium, AmountOfMovesMedium, winsMedium, winsInWinningMedium, winningPosMedium, winsInDrawnMedium, drawnPosMedium = test(testGames, False, True, 'medium')
+	# amountOfInfiniteLoopsHard, AmountOfMovesHard, winsHard, winsInWinningHard, winningPosHard, winsInDrawnHard, drawnPosHard = test(testGames, False, True, 'hard')
+
+
 	# pretty print
-	test(15, True, True)
+	# print "ALL POSITIONS:"
+	# test(15, True, True, 'None')
+	# print "EASY POSITIONS:"
+	# test(15, True, True, 'easy')
+	# print "MEDIUM POSITIONS:"
+	# test(15, True, True, 'medium')
+	# print "HARD POSITIONS:"
+	# test(15, True, True, 'hard')
 
 	endTime = time.clock()
 	print '-' * 50
 	print endTime - startTime, "seconds total time"
 	print '-' * 50
-	print "infinite loops baseline = ", amountOfInfiniteLoopsBase
-	print "moves till won baseline = " , AmountOfMovesBase/winsBase
-	print "wins in winning positions baseline = ", winsInWinningBase/winningPosBase
-	print "wins in drawn positions baseline = ", winsInDrawnBase/drawnPosBase
-	print '-' * 50
-	print "infinite loops after learning= ", amountOfInfiniteLoops
-	print "moves till won after learning = " , AmountOfMoves/wins
-	print "wins in winning positions after learning = ", winsInWinning/winningPos
-	print "wins in drawn positions after learning = ", winsInDrawn/drawnPos
+	# print "infinite loops baseline = ", amountOfInfiniteLoopsBase
+	# print "moves till won baseline = " , AmountOfMovesBase/winsBase
+	# print "wins in winning positions baseline = ", winsInWinningBase/winningPosBase
+	# print "wins in drawn positions baseline = ", winsInDrawnBase/drawnPosBase
+	# print '-' * 50
+	# print "infinite loops after learning= ", amountOfInfiniteLoops
+	# print "moves till won after learning = " , AmountOfMoves/wins
+	# print "wins in winning positions after learning = ", winsInWinning/winningPos
+	# print "wins in drawn positions after learning = ", winsInDrawn/drawnPos
 
+	# print '-' * 50
+	# print "EASY results"
+	# print "infinite loops after learning= ", amountOfInfiniteLoopsEasy
+	# print "moves till won after learning = " , AmountOfMovesEasy/winsEasy
+	# print "wins in winning positions after learning = ", winsInWinningEasy/winningPosEasy
+	# print "wins in drawn positions after learning = ", winsInDrawnEasy/(drawnPosEasy +1)
+	# print "ratio of winning positions= ", winningPosEasy/testGames
+    #
+	# print '-' * 50
+	# print "MEDIUM results"
+	# print "infinite loops after learning= ", amountOfInfiniteLoopsMedium
+	# print "moves till won after learning = " , AmountOfMovesMedium/winsMedium
+	# print "wins in winning positions after learning = ", winsInWinningMedium/winningPosMedium
+	# print "wins in drawn positions after learning = ", winsInDrawnMedium/drawnPosMedium
+	# print "ratio of winning positions= ", winningPosMedium/testGames
+    #
+	# print '-' * 50
+	# print "HARD results"
+	# print "infinite loops after learning= ", amountOfInfiniteLoopsHard
+	# print "moves till won after learning = " , AmountOfMovesHard/winsHard
+	# print "wins in winning positions after learning = ", winsInWinningHard/winningPosHard
+	# print "wins in drawn positions after learning = ", winsInDrawnHard/drawnPosHard
+	# print "ratio of winning positions= ", winningPosHard/testGames
 
-	evaluate()
+	#evaluate()
 
 train()
 
@@ -1236,36 +1490,91 @@ train()
 # overmorgen x quars fixen en elke iteratie plotje printen INZICHT, dan kun je bugs wel vinden
 # misschien wel a te groot ofzo.
 
-# tracken hoe vaak hij random zet doet. (heel misschien die games niet opslaan)
-
-# evaluatie eind wel helemaal goed
-
-# evaluatie opslaan misschien aanpassen, als x q niet lukt.
-
-# sowieso evaluatie amount of moves to win
-
-# even teryg veranderen naar randomKing en kijken of hij leert (check!)
-
-# loss gaat omhoog, a maakte niet echt verschil, kan nog lager proberen?..
-
-# haal 50 rules reward weg, dat begrijpt ie niet zonder input van aantal zetten, misschien dat
-# # q vals daarom zo omlaag gaan.
-
-# vandaag om 4 uur paar testjes en naar matthias voor weekend.
-
-# print states en alles.
-
-
-# moet ik de pion alles op 0 zetten als geslagen?
-
 
 # Werkt het nu? Volgens mij wel. Maar het lijkt wel alsof hij minder wint als ie langer traint.
-# Voor inzicht, amount of winns in winning pos tracking, daar gaat het om
-# amount of moves to win
+# Voor inzicht, amount of winns in winning pos tracking, daar gaat het om DONE
+# amount of moves to win DONE
 # av amount of infinite loops
 # sunfish doet hele rare zetten.
+# Ik denk dat in verliezende stellingen sunfish ook slechtere zetten doet?
+# random zetten veel minder bij langere max nodes
+# ik vind de baseline wel erg hoog, even checken of wel klopt.
+
+# als ik morgen die plotjes van leren heb kan ik pas langer trainen, nu gewoon geen inzicht.
 
 
+# bij de uiteindelijke resultaten de testen veel langer. Dan nog wat experimentjes doen
+# voor laatste paar procentjes, met super computer. Maak mooie plaatjes van resultaten
+# kan ook in 4x4 bord. Dan sunfish ook veel langer
+
+
+
+# dan hoef ik alleen nog ev via supercomputer te doen.
+
+
+
+# PROBLEEM: bij 2000 zoek dan na 18 ofzo NONE van sunfish
+# nu even proberen met 200 zoek, zodat ik iets heb morgen.
+
+# winrate gaat omlaag en is eerst heel erg hoog.
+
+# gezien het gifje heeft hij niet geleerd om samen te werken met de pion.
+
+# duurt langer als ie langer heeft getraind, makes sense?
+
+# lijkt ook wel alsof soms gewoon 6 keer zo langzaam ofzo, zonder duidelijke reden.
+
+# results laten zien, grafiekjes laten zien, gif laten zien
+# probleem dat hij niet goed samenwerkt: hoe kan dat?
+# probleem van NONE moves, hoe debuggen?
+
+# restart all params ofzo, gewoon train() vaker aanroepen? Of anders elke 100 i even opnieuw aan
+# zetten.
+
+# opdelen in easy and hard positions.
+
+# sunfish kan het ook slecht doen in posiites die voor hem verloren zijn, dus dat het best makkelijk i
+# om te winnen in winning pos, en in drawn opeens heel moeilijk.
+
+# nu moet ik dus ev beter opslaan, zoals epsilon, even kijken of RM uitmaakt. Even
+# opletten met RM inladen en foutje. Misschien ligt het aan expand dims, of heb ik het niet
+# meer gecheckt na batches? worth trying.
+
+# even kijken of hij nu weer na 13 stopt (duurt lang). nu lijkt loadev niet fout te gaan, maar misschien
+# gaat ie stiekem fout. anders RM opnieuw vullen, kan ook. (mag denk ik niet echt)
+
+# als dit werkt, dan werkt alles opzich. Ik hoef mijn resultaten niet meer te verbeteren
+# geen tijd meer voor. Dan alles goed opschrijven.
+# experiments ook wat ik eerst deed met wat getalletjes, hoeft niet lang, maar wel
+# een soort opbouw, zodat mensen mijn approach na kunnen doen.
+
+
+# misschien die nieuwe evaluatie weer opslaan in files en plotten.
+
+# let it train in hard positions and see how it performs? Should the network be bigger?
+
+# moet ik nog experimenteren met de netwerk grootte? Dan toch iets schrijven dat steeds
+# opnieuw python reset?
+
+# moet de learning rate misschien kleiner? (nee dat is alleen als loss niet verder omlaag
+# gaat.
+
+# kan ook steeds evaluaeren zonder show, zodat hij het in de plaatjes opslaat, goed voor
+# inzicht.
+
+# misschien programma stoppen als NONE move
+
+
+
+
+# moet eigenlijk meer inzicht in hoe hij het doet, door te kijken naar de game.
+# Als ik probeer die 3 level resultaten zo hoog mogelijk te krijgen moet ik ook
+# die plotten, eigenlijk. Wees zeker of hij nog leert.
+
+
+
+# Discussie: ik zou hem ook verliezende stellingen moeten geven, dan kan je zien of
+# hij meer wint dan verliest.
 
 
 
